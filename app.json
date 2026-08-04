@@ -1,0 +1,34 @@
+{
+  "expo": {
+    "name": "PESA LIST",
+    "slug": "pesa-list",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "android": {
+      "package": "com.pesalist.app",
+      "permissions": [
+        "RECEIVE_SMS",
+        "READ_SMS",
+        "READ_PHONE_STATE"
+      ],
+      "blockedPermissions": []
+    },
+    "plugins": [
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "minSdkVersion": 23,
+            "compileSdkVersion": 34,
+            "targetSdkVersion": 34
+          }
+        }
+      ],
+      "expo-asset"
+    ]
+  }
+}

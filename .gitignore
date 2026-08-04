@@ -1,0 +1,8 @@
+node_modules/
+android/app/build/
+android/build/
+android/.gradle/
+.expo/
+dist/
+build-error.txt
+*.apk
