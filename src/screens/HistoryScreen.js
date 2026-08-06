@@ -1,7 +1,8 @@
 // HistoryScreen.js — View past trips and share records
 import React from 'react';
 import { View, Text, FlatList, TouchableOpacity, StyleSheet, Share } from 'react-native';
-import { exportTripAsText, formatTripForHistory } from '../logic/tripManager';
+import { formatTripForHistory, exportTripAsText } from '../logic/tripManager';
+// import { exportTripToPdf } from '../logic/pdfExporter';
 
 export default function HistoryScreen({ history, onBack, theme }) {
   const handleShare = async (trip) => {
@@ -16,35 +17,24 @@ export default function HistoryScreen({ history, onBack, theme }) {
   const renderItem = ({ item }) => {
     const meta = formatTripForHistory(item);
     return (
-      <View style={[styles.card, { 
-        backgroundColor: theme.surface, 
-        borderColor: theme.border,
-        shadowColor: theme.shadow,
-      }]}>
-        <View style={styles.row}>
-          <Text style={[styles.date, { color: theme.textSecondary }]}>
+      <View style={[styles.ledgerRow, { borderBottomColor: '#EAF3DE' }]}>
+        <View style={[styles.statusLine, { backgroundColor: meta.status === 'ended' ? '#639922' : '#FAC775' }]} />
+        <View style={styles.info}>
+          <Text style={styles.date}>
             {meta.date} · {meta.time}
           </Text>
-          <View style={[styles.badge, { 
-            backgroundColor: meta.status === 'ended' ? theme.successBg : theme.warningBg 
-          }]}>
-            <Text style={{ 
-              fontSize: 11, fontWeight: '700', 
-              color: meta.status === 'ended' ? theme.successText : theme.warningText 
-            }}>
-              {meta.status}
-            </Text>
-          </View>
+          <Text style={styles.sub}>
+            {meta.count} passengers · {meta.checked} verified
+          </Text>
         </View>
-        <Text style={[styles.total, { color: theme.textPrimary }]}>
-          Ksh {meta.total.toLocaleString()}
-        </Text>
-        <Text style={[styles.sub, { color: theme.textMuted }]}>
-          {meta.count} passengers · {meta.checked} verified
-        </Text>
-        <TouchableOpacity onPress={() => handleShare(item)} style={[styles.shareBtn, { backgroundColor: theme.primary }]}>
-          <Text style={styles.shareText}>Share Record</Text>
-        </TouchableOpacity>
+        <View style={styles.right}>
+          <Text style={styles.total}>
+            Ksh {(meta.total || 0).toLocaleString()}
+          </Text>
+          <TouchableOpacity onPress={() => handleShare(item)} style={styles.shareBtn}>
+            <Text style={styles.shareText}>Share Record</Text>
+          </TouchableOpacity>
+        </View>
       </View>
     );
   };
@@ -87,32 +77,33 @@ const styles = StyleSheet.create({
   backBtn: { marginRight: 12 },
   backText: { fontSize: 16, fontWeight: '600' },
   title: { fontSize: 20, fontWeight: '700' },
-  card: {
-    borderRadius: 16,
-    padding: 18,
-    marginBottom: 14,
-    borderWidth: 1,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
-    shadowRadius: 6,
-    elevation: 2,
-  },
-  row: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 },
-  date: { fontSize: 13, fontWeight: '500' },
-  badge: {
-    paddingHorizontal: 10,
-    paddingVertical: 3,
-    borderRadius: 8,
-  },
-  total: { fontSize: 26, fontWeight: '800', fontVariant: ['tabular-nums'] },
-  sub: { fontSize: 14, marginTop: 2, fontWeight: '500' },
-  shareBtn: {
-    marginTop: 14,
-    padding: 12,
-    borderRadius: 12,
+  ledgerRow: {
+    flexDirection: 'row',
     alignItems: 'center',
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+    borderBottomWidth: 0.5,
+    backgroundColor: '#fff',
   },
-  shareText: { color: '#fff', fontSize: 15, fontWeight: '700' },
+  statusLine: {
+    width: 4,
+    height: 40,
+    borderRadius: 2,
+    marginRight: 12,
+  },
+  info: { flex: 1 },
+  date: { fontSize: 14, fontWeight: '600', color: '#2C2C2A' },
+  sub: { fontSize: 12, color: '#888780', marginTop: 2 },
+  right: { alignItems: 'flex-end' },
+  total: { fontSize: 18, fontWeight: '700', color: '#2C2C2A' },
+  shareBtn: {
+    marginTop: 6,
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    borderRadius: 8,
+    backgroundColor: '#EAF3DE',
+  },
+  shareText: { color: '#3B6D11', fontSize: 12, fontWeight: '700' },
   empty: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 40 },
   emptyText: { fontSize: 15 },
 });

@@ -169,10 +169,20 @@ function searchPayments(trip, query) {
 }
 
 function getTripTotals(trip) {
+  if (!trip || !trip.payments) {
+    return {
+      totalCollected: 0,
+      totalChecked: 0,
+      checkedCount: 0,
+      pendingCount: 0,
+      totalPayments: 0,
+      unmatchedExpected: 0,
+    };
+  }
   const totalCollected = trip.payments.reduce((sum, p) => sum + (p.amount || 0), 0);
   const checkedCount = trip.payments.filter(p => p.checked).length;
   const totalChecked = trip.payments.filter(p => p.checked).reduce((sum, p) => sum + (p.amount || 0), 0);
-  const unmatchedExpected = trip.expected.filter(e => !e.matched).length;
+  const unmatchedExpected = (trip.expected || []).filter(e => !e.matched).length;
   const pendingCount = trip.payments.length - checkedCount;
 
   return {
@@ -244,11 +254,19 @@ function serializeTrip(trip) {
 }
 
 function deserializeTrip(jsonString) {
-  const parsed = JSON.parse(jsonString);
-  return {
-    ...parsed,
-    transactions: new Set(parsed.transactions || []),
-  };
+  try {
+    if (!jsonString) return createTrip();
+    const parsed = JSON.parse(jsonString);
+    return {
+      ...parsed,
+      payments: parsed.payments || [],
+      expected: parsed.expected || [],
+      transactions: new Set(parsed.transactions || []),
+    };
+  } catch (e) {
+    console.error('Failed to deserialize trip', e);
+    return createTrip();
+  }
 }
 
 // NEW: Get all payments sorted — checked (green) at top, unchecked below
@@ -259,6 +277,22 @@ function getAllPaymentsSorted(trip) {
     if (a.checked !== b.checked) return a.checked ? 1 : -1;
     return new Date(b.receivedAt) - new Date(a.receivedAt);
   });
+}
+
+// NEW: Get lifetime stats from history
+function getLifetimeStats(history) {
+  if (!history || history.length === 0) {
+    return { totalCollected: 0, totalTrips: 0, totalPassengers: 0 };
+  }
+
+  return history.reduce((acc, trip) => {
+    const totals = getTripTotals(trip);
+    return {
+      totalCollected: acc.totalCollected + totals.totalCollected,
+      totalTrips: acc.totalTrips + 1,
+      totalPassengers: acc.totalPassengers + totals.totalPayments,
+    };
+  }, { totalCollected: 0, totalTrips: 0, totalPassengers: 0 });
 }
 
 module.exports = {
@@ -276,4 +310,5 @@ module.exports = {
   exportTripAsText,
   formatTripForHistory,
   getAllPaymentsSorted,
+  getLifetimeStats,
 };

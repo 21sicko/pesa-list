@@ -1,6 +1,7 @@
 // HoldToConfirmButton.js — Press and hold to prevent accidental taps
 import React, { useRef, useState, useCallback } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Animated } from 'react-native';
+// import { Ionicons } from '@expo/vector-icons';
 
 export default function HoldToConfirmButton({ 
   label, 
@@ -35,7 +36,7 @@ export default function HoldToConfirmButton({
 
   const cancelHold = useCallback(() => {
     if (!confirmedRef.current) {
-      progress.stop();
+      progress.stopAnimation();
       Animated.timing(progress, {
         toValue: 0,
         duration: 150,
@@ -60,9 +61,14 @@ export default function HoldToConfirmButton({
     >
       <Animated.View style={[styles.fill, { width: progressWidth, backgroundColor: 'rgba(255,255,255,0.25)' }]} />
       <View style={styles.content}>
-        <Text style={styles.label}>
-          {isHolding ? 'Hold to confirm...' : `${icon ? icon + ' ' : ''}${label}`}
-        </Text>
+        <View style={styles.row}>
+          {icon && (
+            <Text style={{ fontSize: 18, marginRight: 8 }}>{icon}</Text>
+          )}
+          <Text style={styles.label}>
+            {isHolding ? 'Hold to confirm...' : label}
+          </Text>
+        </View>
       </View>
     </TouchableOpacity>
   );
@@ -85,6 +91,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 14,
     zIndex: 1,
+  },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   label: {
     color: '#fff',

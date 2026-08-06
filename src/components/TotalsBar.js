@@ -2,8 +2,14 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 
-export default function TotalsBar({ totals, theme }) {
-  const { totalCollected, checkedCount, pendingCount, totalPayments, unmatchedExpected } = totals;
+export default function TotalsBar({ totals = {}, theme }) {
+  const {
+    totalCollected = 0,
+    checkedCount = 0,
+    pendingCount = 0,
+    totalPayments = 0,
+    unmatchedExpected = 0
+  } = totals;
 
   const allGood = pendingCount === 0 && unmatchedExpected === 0 && totalPayments > 0;
   const nothingYet = totalPayments === 0;
@@ -11,7 +17,7 @@ export default function TotalsBar({ totals, theme }) {
   return (
     <View style={[styles.bar, { backgroundColor: allGood ? theme.success : theme.primary }]}>
       <View style={styles.left}>
-        <Text style={styles.big}>Ksh {totalCollected.toLocaleString()}</Text>
+        <Text style={styles.big}>Ksh {(totalCollected || 0).toLocaleString()}</Text>
         <Text style={styles.sub}>
           {nothingYet ? 'No payments yet' : `${checkedCount} of ${totalPayments} verified`}
         </Text>

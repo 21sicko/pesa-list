@@ -6,3 +6,5 @@ android/.gradle/
 dist/
 build-error.txt
 *.apk
+
+.env.local

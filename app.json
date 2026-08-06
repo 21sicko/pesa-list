@@ -4,7 +4,8 @@
     "slug": "pesa-list",
     "version": "1.0.0",
     "orientation": "portrait",
-    "userInterfaceStyle": "light",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
     "assetBundlePatterns": [
       "**/*"
     ],
@@ -15,14 +16,18 @@
         "READ_SMS",
         "READ_PHONE_STATE"
       ],
-      "blockedPermissions": []
+      "blockedPermissions": [],
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0A6E2E"
+      }
     },
     "plugins": [
       [
         "expo-build-properties",
         {
           "android": {
-            "minSdkVersion": 23,
+            "minSdkVersion": 24,
             "compileSdkVersion": 34,
             "targetSdkVersion": 34
           }

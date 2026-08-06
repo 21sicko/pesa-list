@@ -18,7 +18,8 @@ function parseAmount(amountStr) {
 
 function cleanName(nameStr) {
   if (!nameStr) return 'UNKNOWN';
-  return nameStr.trim().replace(/\s+/g, ' ').toUpperCase();
+  // Remove trailing phone numbers if they leaked into the name
+  return nameStr.replace(/\s+\d{7,}$/, '').trim().replace(/\s+/g, ' ').toUpperCase();
 }
 
 function parseMpesasms(smsText, senderId) {
@@ -52,7 +53,7 @@ function parseMpesasms(smsText, senderId) {
 function tryStrictPatterns(text) {
   const patterns = [
     {
-      regex: /([A-Z0-9]{8,10})\s+[Cc]onfirmed[.,]\s+(?:You have received|received)\s+Ksh\s*([\d,]+\.?\d{0,2})\s+from\s+([A-Za-z\s\.\-']+?)\s+(\d{10,12}|\d{3,4}[X\*]{3,7}|\d{3,4}\d{3}\*{3})\s+[Oo]n\s+[\d\/]+/,
+      regex: /([A-Z0-9]{8,10})\s+[Cc]onfirmed[.,]\s+(?:You have received|received)\s+Ksh\s*([\d,]+\.?\d{0,2})\s+from\s+([A-Za-z\s\.\-']+?)\s*(\d{10,12}|\d{3,4}[X\*]{3,7}|\d{3,4}\d{3}\*{3})?\s+[Oo]n\s+[\d\/]+/,
       groups: { code: 1, amount: 2, name: 3, phone: 4 }
     },
     {

@@ -2,6 +2,7 @@
 // brand/verified moments only (not tinted into every border and label —
 // that was why verified vs pending was hard to tell apart before).
 import { useState, useEffect } from 'react';
+import { useColorScheme } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const THEME_KEY = '@pesalist_theme';
@@ -56,13 +57,18 @@ export const themes = {
 };
 
 export function useTheme() {
-  const [themeName, setThemeName] = useState('light');
+  const systemScheme = useColorScheme();
+  const [themeName, setThemeName] = useState(systemScheme || 'light');
 
   useEffect(() => {
     AsyncStorage.getItem(THEME_KEY).then(name => {
-      if (name === 'dark' || name === 'light') setThemeName(name);
+      if (name === 'dark' || name === 'light') {
+        setThemeName(name);
+      } else if (systemScheme) {
+        setThemeName(systemScheme);
+      }
     });
-  }, []);
+  }, [systemScheme]);
 
   const toggleTheme = async () => {
     const next = themeName === 'light' ? 'dark' : 'light';

@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, FlatList, TextInput, TouchableOpacity,
-  StyleSheet, SafeAreaView, StatusBar, Alert, Platform, KeyboardAvoidingView
+  StyleSheet, SafeAreaView, StatusBar, Alert, Platform, KeyboardAvoidingView, PermissionsAndroid
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -10,10 +10,14 @@ import { useSmsListener } from './src/hooks/useSmsListener';
 import { useTheme } from './src/hooks/useTheme';
 import PaymentCard from './src/components/PaymentCard';
 import ExpectingModal from './src/components/ExpectingModal';
-import TotalsBar from './src/components/TotalsBar';
+import LedgerHeader from './src/components/LedgerHeader';
 import Toast from './src/components/Toast';
 import HistoryScreen from './src/screens/HistoryScreen';
 import HoldToConfirmButton from './src/components/HoldToConfirmButton';
+import AdminScreen from './src/screens/AdminScreen';
+import ErrorBoundary from './src/ErrorBoundary';
+// import { Ionicons } from '@expo/vector-icons';
+// import analytics from '@react-native-firebase/analytics'; // Requires native setup
 
 import {
   createTrip, endTrip, addPayment, addExpectedPayment,
@@ -25,13 +29,15 @@ import {
 const ACTIVE_KEY = '@fv_active_trip';
 const HISTORY_KEY = '@fv_history';
 
-export default function App() {
+function App() {
   const { theme, themeName, toggleTheme } = useTheme();
   const [trip, setTrip] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [showExpecting, setShowExpecting] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
+  const [showAdmin, setShowAdmin] = useState(false);
   const [history, setHistory] = useState([]);
+  const [smsLog, setSmsLog] = useState([]);
 
   // Undo toast state
   const [toast, setToast] = useState({ visible: false, message: '', paymentId: null });
@@ -41,23 +47,33 @@ export default function App() {
   useEffect(() => {
     (async () => {
       try {
+        if (Platform.OS === 'android') {
+          await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.RECEIVE_SMS);
+          await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.READ_SMS);
+        }
+
+        // Firebase Analytics: Log App Open
+        // try { await analytics().logAppOpen(); } catch(e) {}
+
         const [saved, hist] = await Promise.all([
           AsyncStorage.getItem(ACTIVE_KEY),
           AsyncStorage.getItem(HISTORY_KEY)
         ]);
+
+        let initialTrip = createTrip();
         if (saved) {
           const t = deserializeTrip(saved);
           if (shouldAutoEnd(t)) {
             await archiveTrip(t);
-            setTrip(createTrip());
           } else {
-            setTrip(t);
+            initialTrip = t;
           }
-        } else {
-          setTrip(createTrip());
         }
+        setTrip(initialTrip);
+
         if (hist) setHistory(JSON.parse(hist).map(deserializeTrip));
       } catch (e) {
+        console.error('Init failed', e);
         setTrip(createTrip());
       }
     })();
@@ -80,15 +96,27 @@ export default function App() {
     await AsyncStorage.removeItem(ACTIVE_KEY);
   };
 
-  const handleSms = useCallback((message) => {
+  const handleSms = useCallback(async (message) => {
+    // Log raw SMS for admin debug
+    setSmsLog(prev => [{ time: Date.now(), body: message.body }, ...prev].slice(0, 10));
+
+    // We use a functional update to avoid stale closure issues with 'trip'
+    // but we must be careful NOT to do side effects inside the updater.
+    // However, for SMS we usually want the latest trip.
+
     setTrip(currentTrip => {
       const baseTrip = currentTrip || createTrip();
+
+      // If the trip should have ended, we just start a new one for this SMS.
+      // The auto-archiving of the old one is handled in the background if possible,
+      // but here we just ensure the user gets their payment recorded.
+      let targetTrip = baseTrip;
       if (shouldAutoEnd(baseTrip)) {
-        archiveTrip(baseTrip);
-        const fresh = createTrip();
-        return addPayment(fresh, message.body, message.originatingAddress).trip;
+        targetTrip = createTrip();
       }
-      return addPayment(baseTrip, message.body, message.originatingAddress).trip;
+
+      const result = addPayment(targetTrip, message.body, message.originatingAddress);
+      return result.trip;
     });
   }, []);
 
@@ -104,13 +132,20 @@ export default function App() {
 
   // Handle check/uncheck with undo toast
   const handleToggle = (paymentId) => {
+    let paymentName = '';
+    let isNowChecked = false;
+
     setTrip(t => {
+      if (!t) return t;
       const updated = toggleChecked(t, paymentId);
       const payment = updated.payments.find(p => p.id === paymentId);
-      const isNowChecked = payment?.checked;
-      showToast(`${payment?.senderName} ${isNowChecked ? 'verified ✓' : 'un-done'}`, paymentId);
+      paymentName = payment?.senderName || 'Payment';
+      isNowChecked = !!payment?.checked;
       return updated;
     });
+
+    // Side effect OUTSIDE the updater
+    showToast(`${paymentName} ${isNowChecked ? 'verified ✓' : 'un-done'}`, paymentId);
   };
 
   const handleUndo = () => {
@@ -129,10 +164,21 @@ export default function App() {
   };
 
   const handleEndTrip = async () => {
-    if (trip.payments.length === 0) {
+    if (!trip || trip.payments.length === 0) {
       showToast('No payments to save');
       return;
     }
+
+    // Firebase Analytics: Log Trip End
+    /*
+    try {
+      await analytics().logEvent('trip_ended', {
+        total_ksh: getTripTotals(trip).totalCollected,
+        passengers: trip.payments.length
+      });
+    } catch(e) {}
+    */
+
     await archiveTrip(trip);
     setTrip(createTrip());
     setSearchQuery('');
@@ -148,12 +194,44 @@ export default function App() {
     showToast('New trip started');
   };
 
-  const handleVoiceSearch = () => {
-    Alert.alert('Voice Search', 'Install @react-native-voice/voice to enable. For now, type the name.', [{ text: 'OK' }]);
+  const handleFactoryReset = async () => {
+    await AsyncStorage.multiRemove([ACTIVE_KEY, HISTORY_KEY, '@pesalist_theme']);
+    setTrip(createTrip());
+    setHistory([]);
+    setShowAdmin(false);
+    showToast('All data cleared');
+  };
+
+  const handleImportData = async (data) => {
+    try {
+      await AsyncStorage.setItem(HISTORY_KEY, JSON.stringify(data.history || []));
+      if (data.activeTrip) {
+        await AsyncStorage.setItem(ACTIVE_KEY, JSON.stringify(data.activeTrip));
+        setTrip(deserializeTrip(JSON.stringify(data.activeTrip)));
+      }
+      setHistory((data.history || []).map(deserializeTrip));
+      setShowAdmin(false);
+      showToast('Data imported successfully');
+    } catch (e) {
+      Alert.alert('Import Failed', e.message);
+    }
   };
 
   if (showHistory) {
     return <HistoryScreen history={history} onBack={() => setShowHistory(false)} theme={theme} />;
+  }
+
+  if (showAdmin) {
+    return (
+      <AdminScreen
+        history={history}
+        smsLog={smsLog}
+        onBack={() => setShowAdmin(false)}
+        onReset={handleFactoryReset}
+        onImport={handleImportData}
+        theme={theme}
+      />
+    );
   }
 
   const allSorted = trip ? getAllPaymentsSorted(trip) : [];
@@ -167,67 +245,41 @@ export default function App() {
     <SafeAreaView style={[styles.container, { backgroundColor: theme.bg }]}>
       <StatusBar barStyle={themeName === 'dark' ? 'light-content' : 'dark-content'} />
 
-      {/* Clean Header */}
-      <View style={[styles.header, { backgroundColor: theme.headerBg, borderBottomColor: theme.border }]}>
-        <View style={styles.headerTop}>
-          <TouchableOpacity 
-            onLongPress={handleManualStart}
-            delayLongPress={1000}
-            onPress={() => showToast('Hold ↺ for new trip')}
-            style={styles.iconBtn}>
-            <Text style={[styles.iconText, { color: theme.textSecondary }]}>↺</Text>
+      <LedgerHeader
+        totals={{ ...totals, startedAt: trip?.startedAt }}
+        onShowHistory={() => setShowHistory(true)}
+        onManualStart={handleManualStart}
+        onShowAdmin={() => setShowAdmin(true)}
+        theme={theme}
+        themeName={themeName}
+      />
+
+      {/* Search Bar - Floating */}
+      <View style={styles.searchContainer}>
+        <View style={[styles.searchBox, { backgroundColor: '#fff', borderColor: '#D3D1C7' }]}>
+          <Text style={{ fontSize: 16 }}>🔍</Text>
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search passenger..."
+            placeholderTextColor="#888780"
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            autoCapitalize="characters"
+          />
+          <TouchableOpacity style={styles.micBtn}>
+            <Text style={{ fontSize: 16 }}>🎤</Text>
           </TouchableOpacity>
-          <Text style={[styles.headerTitle, { color: theme.textPrimary }]}>Pesa List</Text>
-          <View style={styles.headerRight}>
-            <TouchableOpacity onPress={() => setShowHistory(true)} style={styles.iconBtn}>
-              <Text style={[styles.iconText, { color: theme.textSecondary }]}>📋</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={toggleTheme} style={styles.iconBtn}>
-              <Text style={[styles.iconText, { color: theme.textSecondary }]}>
-                {themeName === 'dark' ? '☀️' : '🌙'}
-              </Text>
-            </TouchableOpacity>
-          </View>
         </View>
       </View>
-
-      {/* Search */}
-      <View style={[styles.searchBox, { backgroundColor: theme.surface, borderBottomColor: theme.border }]}>
-        <TextInput
-          style={[styles.searchInput, { backgroundColor: theme.bg, color: theme.textPrimary }]}
-          placeholder="Search passenger name..."
-          placeholderTextColor={theme.textMuted}
-          value={searchQuery}
-          onChangeText={setSearchQuery}
-          autoCapitalize="characters"
-        />
-        <TouchableOpacity onPress={handleVoiceSearch} style={styles.voiceBtn}>
-          <Text style={{ fontSize: 20 }}>🎤</Text>
-        </TouchableOpacity>
-        {searchQuery.length > 0 && (
-          <TouchableOpacity onPress={() => setSearchQuery('')}>
-            <Text style={[styles.clearText, { color: theme.textMuted }]}>Clear</Text>
-          </TouchableOpacity>
-        )}
-      </View>
-
-      {/* Debug simulate */}
-      {Platform.OS === 'android' && __DEV__ && (
-        <TouchableOpacity 
-          onPress={() => handleSms({
-            body: 'S98GE969 Confirmed. You have received Ksh50 from TEST USER 254700000000 On 1/8/26 at 11:33 AM New M-PESA balance is Ksh500.',
-            originatingAddress: 'MPESA',
-          })}
-          style={[styles.simulateBtn, { backgroundColor: theme.surfaceHover }]}>
-          <Text style={[styles.simulateText, { color: theme.textSecondary }]}>🧪 Simulate M-Pesa SMS</Text>
-        </TouchableOpacity>
-      )}
 
       {/* Payment List */}
       <FlatList
         data={displayPayments}
         keyExtractor={item => item.id}
         renderItem={({ item }) => <PaymentCard payment={item} onToggle={handleToggle} theme={theme} />}
+        ListHeaderComponent={
+          <Text style={styles.sectionLabel}>TODAY</Text>
+        }
         ListEmptyComponent={
           <View style={styles.empty}>
             <Text style={[styles.emptyText, { color: theme.textMuted }]}>
@@ -238,39 +290,52 @@ export default function App() {
         ListFooterComponent={
           displayExpected.length > 0 ? (
             <View style={styles.expectedSection}>
-              <Text style={[styles.expectedTitle, { color: theme.warningText }]}>
-                Waiting for SMS ({displayExpected.length})
-              </Text>
               {displayExpected.map(exp => (
-                <View key={exp.id} style={[styles.expectedRow, { borderBottomColor: theme.border }]}>
-                  <Text style={[styles.expectedName, { color: theme.textSecondary }]}>{exp.passengerName}</Text>
-                  {exp.expectedAmount && (
-                    <Text style={[styles.expectedAmt, { color: theme.warning }]}>Ksh {exp.expectedAmount}</Text>
-                  )}
+                <View key={exp.id} style={styles.expectedRow}>
+                  <View style={[styles.statusLine, { backgroundColor: '#FAC775' }]} />
+                  <View style={styles.info}>
+                    <Text style={styles.expectedName}>Awaiting SMS ({exp.passengerName})</Text>
+                    <Text style={styles.expectedMeta}>Expected passenger</Text>
+                  </View>
+                  <Text style={styles.expectedAmt}>Ksh {exp.expectedAmount || 0}</Text>
+                  <Text style={{ fontSize: 18 }}>⏳</Text>
                 </View>
               ))}
             </View>
           ) : null
         }
-        contentContainerStyle={{ padding: 16, paddingBottom: 160 }}
+        style={styles.list}
+        contentContainerStyle={{ paddingBottom: 160 }}
       />
 
+      {/* Debug simulate */}
+      {Platform.OS === 'android' && __DEV__ && (
+        <TouchableOpacity
+          onPress={() => handleSms({
+            body: 'S98GE969 Confirmed. You have received Ksh50 from TEST USER 254700000000 On 1/8/26 at 11:33 AM New M-PESA balance is Ksh500.',
+            originatingAddress: 'MPESA',
+          })}
+          style={[styles.simulateBtn, { backgroundColor: theme.surfaceHover }]}>
+          <Text style={[styles.simulateText, { color: theme.textSecondary }]}>🧪 Simulate M-Pesa SMS</Text>
+        </TouchableOpacity>
+      )}
+
       {/* Bottom Bar */}
-      <View style={[styles.bottom, { backgroundColor: theme.barBg, borderTopColor: theme.border }]}>
-        <TotalsBar totals={totals} theme={theme} />
+      <View style={[styles.bottom, { backgroundColor: '#fff', borderTopColor: '#EAF3DE' }]}>
         <View style={styles.actionRow}>
           <TouchableOpacity 
             onPress={() => setShowExpecting(true)} 
-            style={[styles.actionBtn, { backgroundColor: theme.primaryLight }]}>
-            <Text style={[styles.actionText, { color: theme.primary }]}>➕ Expecting</Text>
+            style={styles.expectingBtn}>
+            <Text style={{ fontSize: 16 }}>➕</Text>
+            <Text style={styles.expectingText}>Expecting</Text>
           </TouchableOpacity>
-          <View style={{ flex: 1 }}>
+          <View style={{ flex: 1.4 }}>
             <HoldToConfirmButton
               label="End Trip"
               onConfirm={handleEndTrip}
-              theme={theme}
-              danger={true}
-              icon="🛑"
+              theme={{ ...theme, danger: '#0A6E2E' }}
+              danger={false}
+              icon="🏁"
             />
           </View>
         </View>
@@ -295,53 +360,81 @@ export default function App() {
   );
 }
 
+export default function AppWrapper() {
+  return (
+    <ErrorBoundary>
+      <App />
+    </ErrorBoundary>
+  );
+}
+
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  header: {
+  searchContainer: {
     paddingHorizontal: 16,
-    paddingTop: 8,
-    paddingBottom: 12,
-    borderBottomWidth: 1,
+    marginTop: -14,
+    zIndex: 10,
   },
-  headerTop: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  headerTitle: { fontSize: 22, fontWeight: '800' },
-  headerRight: { flexDirection: 'row', gap: 4 },
-  iconBtn: { padding: 8, borderRadius: 10 },
-  iconText: { fontSize: 18 },
   searchBox: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    padding: 12,
-    borderBottomWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 12,
+    borderWidth: 0.5,
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
   },
   searchInput: {
     flex: 1,
-    fontSize: 16,
-    padding: 12,
-    borderRadius: 12,
+    fontSize: 13,
+    paddingHorizontal: 8,
   },
-  voiceBtn: { padding: 6 },
-  clearText: { fontSize: 14, fontWeight: '600' },
+  micBtn: { padding: 4 },
+  list: {
+    backgroundColor: '#fff',
+    marginTop: 10,
+  },
+  sectionLabel: {
+    color: '#5F5E5A',
+    fontSize: 11,
+    fontWeight: '600',
+    letterSpacing: 0.5,
+    paddingHorizontal: 20,
+    marginTop: 16,
+    marginBottom: 8,
+  },
   simulateBtn: {
-    margin: 10,
-    marginHorizontal: 16,
+    position: 'absolute',
+    bottom: 120,
+    alignSelf: 'center',
     padding: 10,
     borderRadius: 10,
-    alignItems: 'center',
+    zIndex: 5,
   },
   simulateText: { fontSize: 13, fontWeight: '600' },
   empty: { padding: 50, alignItems: 'center' },
   emptyText: { fontSize: 15, textAlign: 'center' },
-  expectedSection: { marginTop: 16, paddingTop: 12 },
-  expectedTitle: { fontSize: 12, fontWeight: '700', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 },
-  expectedRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 8, borderBottomWidth: 1 },
-  expectedName: { fontSize: 15 },
-  expectedAmt: { fontSize: 15, fontWeight: '700' },
+  expectedSection: { paddingVertical: 8 },
+  expectedRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+  },
+  statusLine: {
+    width: 4,
+    height: 36,
+    borderRadius: 2,
+    marginRight: 12,
+  },
+  info: { flex: 1 },
+  expectedName: { color: '#2C2C2A', fontSize: 14, fontWeight: '500' },
+  expectedMeta: { color: '#888780', fontSize: 11, marginTop: 2 },
+  expectedAmt: { color: '#854F0B', fontSize: 15, fontWeight: '600', marginRight: 10 },
   bottom: {
     position: 'absolute',
     bottom: 0,
@@ -349,14 +442,21 @@ const styles = StyleSheet.create({
     right: 0,
     padding: 16,
     paddingBottom: 20,
-    borderTopWidth: 1,
+    borderTopWidth: 0.5,
+    elevation: 10,
   },
-  actionRow: { flexDirection: 'row', gap: 10, marginTop: 10 },
-  actionBtn: {
+  actionRow: { flexDirection: 'row', gap: 10 },
+  expectingBtn: {
     flex: 1,
-    padding: 14,
-    borderRadius: 12,
+    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#639922',
+    backgroundColor: '#fff',
   },
-  actionText: { fontSize: 15, fontWeight: '700' },
+  expectingText: { fontSize: 13, fontWeight: '600', color: '#3B6D11' },
 });

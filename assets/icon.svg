@@ -1,0 +1,18 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Professional Rounded Background -->
+  <rect width="1024" height="1024" rx="220" fill="#0B0F0D"/>
+
+  <!-- Main Speech Bubble Shape -->
+  <path d="M220 320C220 264.772 264.772 220 320 220H704C759.228 220 804 264.772 804 320V580C804 635.228 759.228 680 704 680H420L220 840V320Z" fill="#0A6E2E"/>
+
+  <!-- Phone Silhouette -->
+  <rect x="360" y="300" width="304" height="480" rx="45" fill="#0B0F0D" stroke="white" stroke-width="40"/>
+  <rect x="470" y="330" width="84" height="10" rx="5" fill="white"/>
+
+  <!-- High-Clarity Checkmark Bubble -->
+  <circle cx="700" cy="400" r="140" fill="white" />
+  <path d="M630 400L680 470L780 330" stroke="#0A6E2E" stroke-width="60" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- Accent Glow -->
+  <path d="M320 220H704C759.228 220 804 264.772 804 320V340C804 284.772 759.228 240 704 240H320C264.772 240 220 284.772 220 340V320C220 264.772 264.772 220 320 220Z" fill="white" fill-opacity="0.1"/>
+</svg>

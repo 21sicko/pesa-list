@@ -1,120 +1,75 @@
-// PaymentCard.js — Phone completely hidden, tap to reveal
-import React, { useState } from 'react';
+// PaymentCard.js — Ledger row style
+import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+// import { Ionicons } from '@expo/vector-icons';
 
 export default function PaymentCard({ payment, onToggle, theme }) {
   const isChecked = payment.checked;
-  const [showPhone, setShowPhone] = useState(false);
+  const time = payment.receivedAt
+    ? new Date(payment.receivedAt).toLocaleTimeString('en-KE', { hour: '2-digit', minute: '2-digit' })
+    : '';
 
   return (
     <TouchableOpacity 
       onPress={() => onToggle(payment.id)}
-      activeOpacity={0.85}
-      style={[styles.card, { 
-        backgroundColor: isChecked ? theme.successBg : theme.warningBg,
-        borderColor: isChecked ? theme.success : theme.warning,
-        shadowColor: theme.shadow,
-      }]}
+      activeOpacity={0.7}
+      style={[styles.container, { borderBottomColor: '#EAF3DE' }]}
     >
-      <View style={[styles.accent, { backgroundColor: isChecked ? theme.success : theme.warning }]} />
+      <View style={[styles.statusLine, { backgroundColor: isChecked ? '#639922' : '#B4B2A9' }]} />
 
-      <View style={styles.content}>
-        <View style={styles.topRow}>
-          <Text style={[styles.name, { color: isChecked ? theme.successText : theme.textPrimary }]} numberOfLines={1}>
-            {isChecked ? '✓ ' : '○ '}{payment.senderName}
-          </Text>
-          <Text style={[styles.amount, { color: isChecked ? theme.successText : theme.textPrimary }]}>
-            Ksh {payment.amount?.toLocaleString()}
-          </Text>
-        </View>
+      <View style={styles.info}>
+        <Text style={[styles.name, { color: '#2C2C2A' }]}>{payment.senderName}</Text>
+        <Text style={[styles.meta, { color: '#888780' }]}>
+          {payment.senderPhone || 'No Phone'} · {time}
+        </Text>
+      </View>
 
-        <View style={styles.bottomRow}>
-          <Text style={[styles.meta, { color: theme.textMuted }]}>
-            {isChecked ? 'Verified — tap to undo' : 'Tap to verify'}
-          </Text>
+      <Text style={[styles.amount, { color: isChecked ? '#3B6D11' : '#2C2C2A' }]}>
+        {isChecked ? '+' : ''}Ksh {(payment.amount || 0).toLocaleString()}
+      </Text>
 
-          {payment.senderPhone && (
-            <TouchableOpacity 
-              onPress={(e) => { e.stopPropagation(); setShowPhone(!showPhone); }}
-              style={[styles.phoneBox, { backgroundColor: theme.primaryLight }]}
-            >
-              <Text style={[styles.phoneText, { color: theme.textSecondary }]}>
-                {showPhone ? payment.senderPhone : '🔒 Phone hidden'}
-              </Text>
-              <Text style={[styles.phoneHint, { color: theme.primary }]}>
-                {showPhone ? '  hide' : '  tap to show'}
-              </Text>
-            </TouchableOpacity>
-          )}
-        </View>
+      <View style={styles.iconBox}>
+        <Text style={{ fontSize: 18 }}>
+          {isChecked ? "✅" : "○"}
+        </Text>
       </View>
     </TouchableOpacity>
   );
 }
 
 const styles = StyleSheet.create({
-  card: {
+  container: {
     flexDirection: 'row',
-    borderRadius: 14,
-    marginBottom: 10,
-    borderWidth: 1,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 6,
-    elevation: 2,
-    overflow: 'hidden',
-  },
-  accent: {
-    width: 5,
-  },
-  content: {
-    flex: 1,
-    padding: 16,
-    paddingLeft: 14,
-  },
-  topRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 6,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderBottomWidth: 0.5,
+    backgroundColor: '#fff',
   },
-  name: {
-    fontSize: 18,
-    fontWeight: '700',
-    flex: 1,
+  statusLine: {
+    width: 4,
+    height: 36,
+    borderRadius: 2,
     marginRight: 12,
   },
-  amount: {
-    fontSize: 20,
-    fontWeight: '800',
-    fontVariant: ['tabular-nums'],
+  info: {
+    flex: 1,
   },
-  bottomRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-    gap: 4,
+  name: {
+    fontSize: 15,
+    fontWeight: '600',
   },
   meta: {
-    fontSize: 12,
-    fontWeight: '500',
-    letterSpacing: 0.3,
-  },
-  phoneBox: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 3,
-    paddingHorizontal: 8,
-    borderRadius: 8,
-  },
-  phoneText: {
-    fontSize: 12,
-    fontWeight: '600',
-    letterSpacing: 0.3,
-  },
-  phoneHint: {
     fontSize: 11,
+    marginTop: 2,
+  },
+  amount: {
+    fontSize: 15,
     fontWeight: '700',
+    marginRight: 8,
+  },
+  iconBox: {
+    width: 24,
+    alignItems: 'center',
   },
 });
