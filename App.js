@@ -2,7 +2,8 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, FlatList, TextInput, TouchableOpacity,
-  StyleSheet, SafeAreaView, StatusBar, Alert, Platform, KeyboardAvoidingView, PermissionsAndroid
+  StyleSheet, SafeAreaView, StatusBar, Alert, Platform, KeyboardAvoidingView, PermissionsAndroid,
+  AppRegistry, AppState
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -29,6 +30,30 @@ import {
 const ACTIVE_KEY = '@fv_active_trip';
 const HISTORY_KEY = '@fv_history';
 
+// BACKGROUND SMS HANDLER (Headless JS)
+const SmsBackgroundEvent = async (data) => {
+  try {
+    const { body, sender } = data;
+    const saved = await AsyncStorage.getItem(ACTIVE_KEY);
+    let trip = saved ? deserializeTrip(saved) : createTrip();
+
+    if (shouldAutoEnd(trip)) {
+      // For background, we don't archive to history easily without complex logic,
+      // so we just start a new trip if needed.
+      trip = createTrip();
+    }
+
+    const result = addPayment(trip, body, sender);
+    if (result.added) {
+      await AsyncStorage.setItem(ACTIVE_KEY, serializeTrip(result.trip));
+    }
+  } catch (e) {
+    console.error('Background SMS processing failed', e);
+  }
+};
+
+AppRegistry.registerHeadlessTask('SmsBackgroundEvent', () => SmsBackgroundEvent);
+
 function App() {
   const { theme, themeName, toggleTheme } = useTheme();
   const [trip, setTrip] = useState(null);
@@ -42,6 +67,36 @@ function App() {
   // Undo toast state
   const [toast, setToast] = useState({ visible: false, message: '', paymentId: null });
   const toastTimer = useRef(null);
+
+  // Refresh data when app comes back to foreground
+  useEffect(() => {
+    const checkMissed = async () => {
+      const missed = await getMissedSms();
+      if (missed && missed.length > 0) {
+        setTrip(currentTrip => {
+          let updated = currentTrip || createTrip();
+          missed.forEach(msg => {
+            const result = addPayment(updated, msg.body, msg.sender);
+            updated = result.trip;
+          });
+          return updated;
+        });
+      }
+    };
+
+    const subscription = AppState.addEventListener('change', async (nextAppState) => {
+      if (nextAppState === 'active') {
+        try {
+          const saved = await AsyncStorage.getItem(ACTIVE_KEY);
+          if (saved) setTrip(deserializeTrip(saved));
+          await checkMissed();
+        } catch (e) {}
+      }
+    });
+
+    checkMissed(); // Also check on initial load
+    return () => subscription.remove();
+  }, []);
 
   // Load saved trip + history
   useEffect(() => {
@@ -229,6 +284,10 @@ function App() {
         onBack={() => setShowAdmin(false)}
         onReset={handleFactoryReset}
         onImport={handleImportData}
+        onSimulate={() => handleSms({
+          body: `SIM_${Date.now()} Confirmed. You have received Ksh${Math.floor(Math.random()*500)+50} from ADMIN TEST On 1/8/26 New M-PESA balance is Ksh5000.`,
+          originatingAddress: 'MPESA',
+        })}
         theme={theme}
       />
     );
@@ -395,6 +454,7 @@ const styles = StyleSheet.create({
   },
   micBtn: { padding: 4 },
   list: {
+    flex: 1,
     backgroundColor: '#fff',
     marginTop: 10,
   },

@@ -8,7 +8,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 // import { Ionicons } from '@expo/vector-icons';
 import { getLifetimeStats } from '../logic/tripManager';
 
-export default function AdminScreen({ history, smsLog, onBack, onReset, onImport, theme }) {
+export default function AdminScreen({ history, smsLog, onBack, onReset, onImport, onSimulate, theme }) {
   const stats = getLifetimeStats(history);
   const [importJson, setImportJson] = useState('');
   const [showImport, setShowImport] = useState(false);
@@ -123,6 +123,13 @@ export default function AdminScreen({ history, smsLog, onBack, onReset, onImport
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>DATA MANAGEMENT</Text>
           <View style={styles.btnRow}>
+            <TouchableOpacity onPress={onSimulate} style={[styles.actionBtn, { backgroundColor: '#EAF3DE' }]}>
+              <Text style={{ fontSize: 18 }}>🧪</Text>
+              <Text style={[styles.btnText, { color: '#3B6D11' }]}>Simulate Test</Text>
+            </TouchableOpacity>
+          </View>
+
+          <View style={[styles.btnRow, { marginTop: 12 }]}>
             <TouchableOpacity onPress={handleExport} style={[styles.actionBtn, { backgroundColor: '#EAF3DE' }]}>
               <Text style={{ fontSize: 18 }}>📥</Text>
               <Text style={[styles.btnText, { color: '#3B6D11' }]}>Export Backup</Text>
