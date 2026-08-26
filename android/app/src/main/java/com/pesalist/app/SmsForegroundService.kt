@@ -1,68 +1,76 @@
 package com.pesalist.app
 
-import android.app.*
-import android.content.Context
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.Service
 import android.content.Intent
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
-import com.facebook.react.bridge.Arguments
-import com.facebook.react.modules.core.DeviceEventManagerModule
 
+/**
+ * Keeps a low-priority persistent notification visible so Android's process
+ * killer is much less aggressive with this app. Does NOT do the actual SMS
+ * parsing — SmsReceiver + SmsCapture handle that independently. This service
+ * mainly buys the app more background survival time on aggressive OEM skins
+ * (Tecon/Infinix/Xiaomi battery managers).
+ */
 class SmsForegroundService : Service() {
-    private val CHANNEL_ID = "SmsListenerChannel"
-    private val NOTIFICATION_ID = 101
 
     companion object {
-        private var isRunning = false
-        fun isServiceRunning() = isRunning
+        private const val CHANNEL_ID = "pesa_list_sms_monitor"
+        private const val NOTIFICATION_ID = 1001
+    }
 
-        fun processIncomingSms(context: Context, body: String, sender: String) {
-            val intent = Intent("com.pesalist.app.SMS_RECEIVED")
-            intent.putExtra("body", body)
-            intent.putExtra("sender", sender)
-            context.sendBroadcast(intent)
-
-            // Also store in SharedPreferences for "Missed Messages"
-            val prefs = context.getSharedPreferences("pesa_list_missed", Context.MODE_PRIVATE)
-            val current = prefs.getString("messages", "") ?: ""
-            val entry = "${System.currentTimeMillis()}|$sender|$body"
-            val updated = if (current.isEmpty()) entry else "$current||$entry"
-            prefs.edit().putString("messages", updated).apply()
-        }
+    override fun onCreate() {
+        super.onCreate()
+        createNotificationChannel()
+        startForeground(NOTIFICATION_ID, buildNotification())
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        createNotificationChannel()
-        val notification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Pesa List Active")
-            .setContentText("Listening for M-Pesa payments in background")
-            .setSmallIcon(R.mipmap.ic_launcher)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
-            .setCategory(Notification.CATEGORY_SERVICE)
-            .build()
-
-        startForeground(NOTIFICATION_ID, notification)
-        isRunning = true
+        // START_STICKY: if the OS kills this service anyway, ask it to
+        // recreate the service (without redelivering the last intent) as
+        // soon as resources free up.
         return START_STICKY
     }
 
-    private fun createNotificationChannel() {
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        // Called when the user swipes the app away from recent apps.
+        // Restart ourselves so monitoring survives a swipe-away, not just backgrounding.
+        val restartIntent = Intent(applicationContext, SmsForegroundService::class.java)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val serviceChannel = NotificationChannel(
-                CHANNEL_ID,
-                "SMS Listener Service",
-                NotificationManager.IMPORTANCE_LOW
-            )
-            val manager = getSystemService(NotificationManager::class.java)
-            manager.createNotificationChannel(serviceChannel)
+            applicationContext.startForegroundService(restartIntent)
+        } else {
+            applicationContext.startService(restartIntent)
         }
+        super.onTaskRemoved(rootIntent)
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
-    override fun onDestroy() {
-        isRunning = false
-        super.onDestroy()
+    private fun createNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                CHANNEL_ID,
+                "Payment Monitoring",
+                NotificationManager.IMPORTANCE_MIN // as unobtrusive as possible
+            ).apply {
+                description = "Keeps Pesa List watching for M-Pesa payment messages"
+                setShowBadge(false)
+            }
+            val manager = getSystemService(NotificationManager::class.java)
+            manager?.createNotificationChannel(channel)
+        }
+    }
+
+    private fun buildNotification(): android.app.Notification {
+        return NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle("Pesa List is watching for payments")
+            .setContentText("Tap to open")
+            .setSmallIcon(applicationInfo.icon)
+            .setPriority(NotificationCompat.PRIORITY_MIN)
+            .setOngoing(true)
+            .build()
     }
 }

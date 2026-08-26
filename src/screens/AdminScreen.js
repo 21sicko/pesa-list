@@ -8,10 +8,37 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 // import { Ionicons } from '@expo/vector-icons';
 import { getLifetimeStats } from '../logic/tripManager';
 
-export default function AdminScreen({ history, smsLog, onBack, onReset, onImport, onSimulate, theme }) {
+export default function AdminScreen({ history, smsLog, onBack, onReset, onImport, onSimulate, onSync, theme }) {
   const stats = getLifetimeStats(history);
   const [importJson, setImportJson] = useState('');
   const [showImport, setShowImport] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
+
+  const handleSync = async () => {
+    setIsSyncing(true);
+    await onSync();
+    setIsSyncing(false);
+    Alert.alert('Sync Complete', 'Last 50 messages scanned for missing payments.');
+  };
+
+  const handleExportCSV = async () => {
+    try {
+      let csv = 'Date,Time,Sender,Phone,Amount,Status,AccountRef\n';
+      history.forEach(trip => {
+        trip.payments.forEach(p => {
+          const date = new Date(p.receivedAt).toLocaleDateString();
+          const time = new Date(p.receivedAt).toLocaleTimeString();
+          csv += `"${date}","${time}","${p.senderName}","${p.senderPhone || ''}",${p.amount},"${p.checked ? 'Verified' : 'Pending'}","${p.accountRef || ''}"\n`;
+        });
+      });
+      await Share.share({
+        message: csv,
+        title: 'Pesa List Excel Export (CSV)'
+      });
+    } catch (e) {
+      Alert.alert('CSV Export Failed', e.message);
+    }
+  };
 
   const handleExport = async () => {
     try {
@@ -126,6 +153,21 @@ export default function AdminScreen({ history, smsLog, onBack, onReset, onImport
             <TouchableOpacity onPress={onSimulate} style={[styles.actionBtn, { backgroundColor: '#EAF3DE' }]}>
               <Text style={{ fontSize: 18 }}>🧪</Text>
               <Text style={[styles.btnText, { color: '#3B6D11' }]}>Simulate Test</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={handleSync}
+              disabled={isSyncing}
+              style={[styles.actionBtn, { backgroundColor: '#EAF3DE' }]}
+            >
+              <Text style={{ fontSize: 18 }}>{isSyncing ? '⌛' : '🔄'}</Text>
+              <Text style={[styles.btnText, { color: '#3B6D11' }]}>Sync Inbox</Text>
+            </TouchableOpacity>
+          </View>
+
+          <View style={[styles.btnRow, { marginTop: 12 }]}>
+            <TouchableOpacity onPress={handleExportCSV} style={[styles.actionBtn, { backgroundColor: '#EAF3DE' }]}>
+              <Text style={{ fontSize: 18 }}>📊</Text>
+              <Text style={[styles.btnText, { color: '#3B6D11' }]}>Export Excel (CSV)</Text>
             </TouchableOpacity>
           </View>
 

@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "177191197120",
+    "project_id": "pesa-list",
+    "storage_bucket": "pesa-list.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:177191197120:android:fc3f96dcace8d711bb5025",
+        "android_client_info": {
+          "package_name": "com.pesalist.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAEYxZX65m4b-LfvjUnTX45xKv_O7Zde2A"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -66,7 +66,55 @@ const tests = [
     // Till/business payment format ("for account ...")
     sender: 'MPESA',
     text: 'TFG4H8J7 Confirmed. Ksh1,000.00 received from JANE MUTHONI 0722334455 for account KIOSK1 on 1/8/26 at 7:00 PM. New Business balance is Ksh10,000.00.',
-    expect: { valid: true, name: 'JANE MUTHONI', amount: 1000 }
+    expect: { valid: true, name: 'JANE MUTHONI', amount: 1000, account: 'KIOSK1' }
+  },
+  {
+    // New Paybill sample from user
+    sender: 'MPESA',
+    text: 'XYZ123ABC Confirmed. You have received Ksh50 from JOHN KAMAU 254700000000 for account 12345 on 1/8/26 at 11:33 AM New M-PESA balance is Ksh500.',
+    expect: { valid: true, name: 'JOHN KAMAU', amount: 50, account: '12345' }
+  },
+  {
+    // Paybill without code at start
+    sender: 'MPESA',
+    text: 'Confirmed. You have received Ksh200 from JANE DOE 254711223344 for account REF99 on 1/8/26 at 12:00 PM.',
+    expect: { valid: true, name: 'JANE DOE', amount: 200, account: 'REF99' }
+  },
+  {
+    // standard Till (Buy Goods) format — should still match and have null account
+    sender: 'MPESA',
+    text: 'Confirmed. You have received Ksh150 from SAM OMONDI 254722334455 on 1/8/26 at 1:00 PM.',
+    expect: { valid: true, name: 'SAM OMONDI', amount: 150, account: null }
+  },
+  {
+    // Pochi La Biashara format
+    sender: 'MPESA',
+    text: 'ABC123DEF4 Confirmed. You have received Ksh 100.00 from JANE DOE 254712345678 for your Pochi la Biashara on 20/08/2026 at 1:45 PM. Your Pochi la Biashara balance is Ksh 1200.00.',
+    expect: { valid: true, name: 'JANE DOE', amount: 100, account: 'Pochi: Pochi la Biashara' }
+  },
+  {
+    // SCAM TEST 1: Wrong Sender ID (Not MPESA)
+    sender: '0722000111',
+    text: 'XYZ123ABC Confirmed. You have received Ksh50 from JOHN DOE 254700000000 On 1/8/26 at 11:33 AM.',
+    expect: { valid: false }
+  },
+  {
+    // SCAM TEST 2: Look-alike message but missing "Confirmed"
+    sender: 'MPESA',
+    text: 'You have received Ksh1,000 from M-PESA agent. Go to any agent to withdraw.',
+    expect: { valid: false }
+  },
+  {
+    // SCAM TEST 3: Fake P2P format (Social engineering)
+    sender: 'MPESA',
+    text: 'Dear Customer, your account has been credited with Ksh 5,000. To reverse this, click http://fake-mpesa.com',
+    expect: { valid: false }
+  },
+  {
+    // SCAM TEST 4: "Request" message (User often mistake for payment)
+    sender: 'MPESA',
+    text: 'You have received a request for Ksh 300 from 0711223344. Dial *334# to pay.',
+    expect: { valid: false }
   }
 ];
 
@@ -80,6 +128,7 @@ tests.forEach((t, i) => {
   if (t.expect.valid && r.isValid) {
     if (t.expect.name && r.senderName !== t.expect.name) { ok = false; errs.push(`name="${r.senderName}", expected "${t.expect.name}"`); }
     if (t.expect.amount && r.amount !== t.expect.amount) { ok = false; errs.push(`amount=${r.amount}, expected ${t.expect.amount}`); }
+    if (t.expect.account !== undefined && r.accountRef !== t.expect.account) { ok = false; errs.push(`account="${r.accountRef}", expected "${t.expect.account}"`); }
   }
 
   console.log(ok ? `✅ Test ${i+1}` : `❌ Test ${i+1}: ${errs.join('; ')}`);

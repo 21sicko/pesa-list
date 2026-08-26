@@ -13,6 +13,7 @@ function createTrip(id = null) {
     endedAt: null,
     payments: [],
     expected: [],
+    expenses: [],
     transactions: new Set(),
   };
 }
@@ -144,6 +145,20 @@ function addExpectedPayment(trip, passengerName, expectedAmount) {
   };
 }
 
+function addExpense(trip, category, amount) {
+  if (!trip || trip.status !== 'active') return trip;
+  const newExpense = {
+    id: `expn_${Date.now()}`,
+    category: category.trim().toUpperCase(),
+    amount: parseFloat(amount) || 0,
+    addedAt: new Date().toISOString(),
+  };
+  return {
+    ...trip,
+    expenses: [...(trip.expenses || []), newExpense]
+  };
+}
+
 function toggleChecked(trip, paymentId) {
   if (!trip) return trip;
   return {
@@ -162,9 +177,18 @@ function searchPayments(trip, query) {
     };
   }
   const q = query.trim().toUpperCase();
+  const isNumeric = /^\d+$/.test(q);
+
   return {
-    payments: trip.payments.filter(p => p.senderName.includes(q)),
-    expected: trip.expected.filter(e => !e.matched && e.passengerName.includes(q))
+    payments: trip.payments.filter(p =>
+      p.senderName.includes(q) ||
+      (p.senderPhone && p.senderPhone.includes(q)) ||
+      (isNumeric && p.amount && p.amount.toString().includes(q))
+    ),
+    expected: trip.expected.filter(e =>
+      !e.matched &&
+      (e.passengerName.includes(q) || (isNumeric && e.expectedAmount && e.expectedAmount.toString().includes(q)))
+    )
   };
 }
 
@@ -177,6 +201,8 @@ function getTripTotals(trip) {
       pendingCount: 0,
       totalPayments: 0,
       unmatchedExpected: 0,
+      totalExpenses: 0,
+      netProfit: 0,
     };
   }
   const totalCollected = trip.payments.reduce((sum, p) => sum + (p.amount || 0), 0);
@@ -184,6 +210,7 @@ function getTripTotals(trip) {
   const totalChecked = trip.payments.filter(p => p.checked).reduce((sum, p) => sum + (p.amount || 0), 0);
   const unmatchedExpected = (trip.expected || []).filter(e => !e.matched).length;
   const pendingCount = trip.payments.length - checkedCount;
+  const totalExpenses = (trip.expenses || []).reduce((sum, e) => sum + (e.amount || 0), 0);
 
   return {
     totalCollected: Math.round(totalCollected * 100) / 100,
@@ -192,6 +219,8 @@ function getTripTotals(trip) {
     pendingCount,
     totalPayments: trip.payments.length,
     unmatchedExpected,
+    totalExpenses: Math.round(totalExpenses * 100) / 100,
+    netProfit: Math.round((totalCollected - totalExpenses) * 100) / 100,
   };
 }
 
@@ -261,6 +290,7 @@ function deserializeTrip(jsonString) {
       ...parsed,
       payments: parsed.payments || [],
       expected: parsed.expected || [],
+      expenses: parsed.expenses || [],
       transactions: new Set(parsed.transactions || []),
     };
   } catch (e) {
@@ -269,13 +299,11 @@ function deserializeTrip(jsonString) {
   }
 }
 
-// NEW: Get all payments sorted — checked (green) at top, unchecked below
+// NEW: Get all payments sorted — Alphabetical by senderName
 function getAllPaymentsSorted(trip) {
   if (!trip) return [];
-  // Sort: unchecked first (newest first), then checked (newest first)
   return [...trip.payments].sort((a, b) => {
-    if (a.checked !== b.checked) return a.checked ? 1 : -1;
-    return new Date(b.receivedAt) - new Date(a.receivedAt);
+    return a.senderName.localeCompare(b.senderName);
   });
 }
 
@@ -300,6 +328,7 @@ module.exports = {
   endTrip,
   addPayment,
   addExpectedPayment,
+  addExpense,
   toggleChecked,
   searchPayments,
   getTripTotals,

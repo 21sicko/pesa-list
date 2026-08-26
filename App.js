@@ -1,27 +1,26 @@
-// App.js — Pesa List: Simple, pretty, forgiving
+// App.js — Pesa List: Hardened & Professionally Digitized
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, FlatList, TextInput, TouchableOpacity,
   StyleSheet, SafeAreaView, StatusBar, Alert, Platform, KeyboardAvoidingView, PermissionsAndroid,
-  AppRegistry, AppState
+  AppRegistry, AppState, Vibration, BackHandler, NativeModules
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import { useSmsListener } from './src/hooks/useSmsListener';
+import { useSmsListener, requestBackgroundReliability } from './src/hooks/useSmsListener';
 import { useTheme } from './src/hooks/useTheme';
 import PaymentCard from './src/components/PaymentCard';
 import ExpectingModal from './src/components/ExpectingModal';
+import ExpenseModal from './src/components/ExpenseModal';
 import LedgerHeader from './src/components/LedgerHeader';
 import Toast from './src/components/Toast';
 import HistoryScreen from './src/screens/HistoryScreen';
 import HoldToConfirmButton from './src/components/HoldToConfirmButton';
 import AdminScreen from './src/screens/AdminScreen';
 import ErrorBoundary from './src/ErrorBoundary';
-// import { Ionicons } from '@expo/vector-icons';
-// import analytics from '@react-native-firebase/analytics'; // Requires native setup
 
 import {
-  createTrip, endTrip, addPayment, addExpectedPayment,
+  createTrip, endTrip,  addPayment, addExpectedPayment, addExpense,
   toggleChecked, searchPayments, getTripTotals,
   getAllPaymentsSorted, shouldAutoEnd,
   serializeTrip, deserializeTrip
@@ -34,22 +33,18 @@ const HISTORY_KEY = '@fv_history';
 const SmsBackgroundEvent = async (data) => {
   try {
     const { body, sender } = data;
+    // We try to process it, but the NATIVE side now also caches it in SharedPreferences
+    // as a fail-safe. This Headless JS part is for real-time UI updates if the app is
+    // backgrounded but JS engine is alive.
     const saved = await AsyncStorage.getItem(ACTIVE_KEY);
-    let trip = saved ? deserializeTrip(saved) : createTrip();
+    if (!saved) return;
 
-    if (shouldAutoEnd(trip)) {
-      // For background, we don't archive to history easily without complex logic,
-      // so we just start a new trip if needed.
-      trip = createTrip();
-    }
-
+    let trip = deserializeTrip(saved);
     const result = addPayment(trip, body, sender);
     if (result.added) {
       await AsyncStorage.setItem(ACTIVE_KEY, serializeTrip(result.trip));
     }
-  } catch (e) {
-    console.error('Background SMS processing failed', e);
-  }
+  } catch (e) {}
 };
 
 AppRegistry.registerHeadlessTask('SmsBackgroundEvent', () => SmsBackgroundEvent);
@@ -57,86 +52,125 @@ AppRegistry.registerHeadlessTask('SmsBackgroundEvent', () => SmsBackgroundEvent)
 function App() {
   const { theme, themeName, toggleTheme } = useTheme();
   const [trip, setTrip] = useState(null);
+  const [isLoaded, setIsLoaded] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [showExpecting, setShowExpecting] = useState(false);
+  const [showExpenseModal, setShowExpenseModal] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [showAdmin, setShowAdmin] = useState(false);
+  const [isPrivacyMode, setIsPrivacyMode] = useState(false);
   const [history, setHistory] = useState([]);
   const [smsLog, setSmsLog] = useState([]);
+  const [flashActive, setFlashActive] = useState(false);
 
   // Undo toast state
   const [toast, setToast] = useState({ visible: false, message: '', paymentId: null });
   const toastTimer = useRef(null);
 
-  // Refresh data when app comes back to foreground
-  useEffect(() => {
-    const checkMissed = async () => {
-      const missed = await getMissedSms();
+  // NATIVE MISSED MESSAGE SWEEP
+  const checkMissed = useCallback(async () => {
+    const { SmsBridge } = NativeModules;
+    if (!SmsBridge) return;
+
+    try {
+      const json = await SmsBridge.drainStoredMessages();
+      const missed = JSON.parse(json);
       if (missed && missed.length > 0) {
         setTrip(currentTrip => {
-          let updated = currentTrip || createTrip();
+          if (!currentTrip) return currentTrip;
+          let updated = currentTrip;
           missed.forEach(msg => {
-            const result = addPayment(updated, msg.body, msg.sender);
+            const result = addPayment(updated, msg.body, msg.originatingAddress);
             updated = result.trip;
           });
-          return updated;
+          return { ...updated };
         });
       }
-    };
-
-    const subscription = AppState.addEventListener('change', async (nextAppState) => {
-      if (nextAppState === 'active') {
-        try {
-          const saved = await AsyncStorage.getItem(ACTIVE_KEY);
-          if (saved) setTrip(deserializeTrip(saved));
-          await checkMissed();
-        } catch (e) {}
-      }
-    });
-
-    checkMissed(); // Also check on initial load
-    return () => subscription.remove();
+    } catch (e) {}
   }, []);
 
-  // Load saved trip + history
+  // Handle Back Button
+  useEffect(() => {
+    const backAction = () => {
+      if (showAdmin) { setShowAdmin(false); return true; }
+      if (showHistory) { setShowHistory(false); return true; }
+      if (showExpecting) { setShowExpecting(false); return true; }
+      if (showExpenseModal) { setShowExpenseModal(false); return true; }
+      return false;
+    };
+    const backHandler = BackHandler.addEventListener('hardwareBackPress', backAction);
+    return () => backHandler.remove();
+  }, [showAdmin, showHistory, showExpecting, showExpenseModal]);
+
+  // Refresh data on foreground
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', async (nextAppState) => {
+      if (nextAppState === 'active') {
+        await checkMissed();
+      }
+    });
+    return () => subscription.remove();
+  }, [checkMissed]);
+
+  // Battery Optimization Check
+  useEffect(() => {
+    if (Platform.OS === 'android') {
+      requestBackgroundReliability().then(isIgnoring => {
+        if (!isIgnoring) {
+          Alert.alert(
+            "Keep Pesa List Alive",
+            "To record payments while your screen is off, please disable battery optimization for Pesa List.",
+            [
+              { text: "Later", style: "cancel" },
+              { text: "Fix Now", onPress: () => requestBackgroundReliability() }
+            ]
+          );
+        }
+      });
+    }
+  }, []);
+
+  // INITIAL LOAD
   useEffect(() => {
     (async () => {
       try {
         if (Platform.OS === 'android') {
-          await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.RECEIVE_SMS);
-          await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.READ_SMS);
+          await PermissionsAndroid.requestMultiple([
+            PermissionsAndroid.PERMISSIONS.RECEIVE_SMS,
+            PermissionsAndroid.PERMISSIONS.READ_SMS,
+            PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS
+          ]);
+          const { SmsForegroundModule } = NativeModules;
+          if (SmsForegroundModule) await SmsForegroundModule.startService();
         }
-
-        // Firebase Analytics: Log App Open
-        // try { await analytics().logAppOpen(); } catch(e) {}
 
         const [saved, hist] = await Promise.all([
           AsyncStorage.getItem(ACTIVE_KEY),
           AsyncStorage.getItem(HISTORY_KEY)
         ]);
 
-        let initialTrip = createTrip();
-        if (saved) {
-          const t = deserializeTrip(saved);
-          if (shouldAutoEnd(t)) {
-            await archiveTrip(t);
-          } else {
-            initialTrip = t;
-          }
+        let initialTrip = saved ? deserializeTrip(saved) : createTrip();
+        if (shouldAutoEnd(initialTrip)) {
+          await archiveTrip(initialTrip);
+          initialTrip = createTrip();
         }
         setTrip(initialTrip);
 
         if (hist) setHistory(JSON.parse(hist).map(deserializeTrip));
+        setIsLoaded(true);
       } catch (e) {
-        console.error('Init failed', e);
         setTrip(createTrip());
+        setIsLoaded(true);
       }
     })();
   }, []);
 
+  // SAFE AUTO-SAVE (Prevents state erasure)
   useEffect(() => {
-    if (trip) AsyncStorage.setItem(ACTIVE_KEY, serializeTrip(trip)).catch(() => {});
-  }, [trip]);
+    if (isLoaded && trip && trip.id) {
+      AsyncStorage.setItem(ACTIVE_KEY, serializeTrip(trip)).catch(() => {});
+    }
+  }, [trip, isLoaded]);
 
   const archiveTrip = async (t) => {
     const ended = endTrip(t);
@@ -152,63 +186,72 @@ function App() {
   };
 
   const handleSms = useCallback(async (message) => {
-    // Log raw SMS for admin debug
-    setSmsLog(prev => [{ time: Date.now(), body: message.body }, ...prev].slice(0, 10));
+    // Update SMS Debug Log for Admin
+    setSmsLog(prev => [{
+      time: message.timestamp || Date.now(),
+      body: message.body
+    }, ...prev].slice(0, 15));
 
-    // We use a functional update to avoid stale closure issues with 'trip'
-    // but we must be careful NOT to do side effects inside the updater.
-    // However, for SMS we usually want the latest trip.
+    Vibration.vibrate([0, 200, 100, 200]);
+    setFlashActive(true);
+    setTimeout(() => setFlashActive(false), 800);
 
     setTrip(currentTrip => {
-      const baseTrip = currentTrip || createTrip();
-
-      // If the trip should have ended, we just start a new one for this SMS.
-      // The auto-archiving of the old one is handled in the background if possible,
-      // but here we just ensure the user gets their payment recorded.
-      let targetTrip = baseTrip;
-      if (shouldAutoEnd(baseTrip)) {
-        targetTrip = createTrip();
-      }
-
-      const result = addPayment(targetTrip, message.body, message.originatingAddress);
+      if (!currentTrip) return currentTrip;
+      const result = addPayment(currentTrip, message.body, message.originatingAddress);
       return result.trip;
     });
   }, []);
 
   useSmsListener(handleSms);
 
-  const showToast = (message, paymentId = null) => {
-    if (toastTimer.current) clearTimeout(toastTimer.current);
-    setToast({ visible: true, message, paymentId });
-    toastTimer.current = setTimeout(() => {
-      setToast(prev => ({ ...prev, visible: false }));
-    }, 3000);
+  const handleEndTrip = async () => {
+    if (!trip || (trip.payments.length === 0 && trip.expenses.length === 0)) {
+      showToast('No data to save');
+      return;
+    }
+
+    Alert.alert(
+      "Confirm End Trip",
+      "This will save your current ledger to history and start a fresh one.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "End Trip",
+          onPress: async () => {
+            setIsLoaded(false); // Gate saves
+            await archiveTrip(trip);
+            setTrip(createTrip());
+            setIsLoaded(true);
+            showToast('Trip archived');
+          }
+        }
+      ]
+    );
   };
 
-  // Handle check/uncheck with undo toast
-  const handleToggle = (paymentId) => {
-    let paymentName = '';
-    let isNowChecked = false;
+  const handleManualStart = async () => {
+    const hasData = trip?.payments.length > 0 || trip?.expenses.length > 0;
+    if (hasData) {
+      Alert.alert(
+        "Save Current Trip?",
+        "Should we save your current data to history first?",
+        [
+          { text: "Cancel", style: "cancel" },
+          { text: "Discard", style: "destructive", onPress: () => setTrip(createTrip()) },
+          { text: "Save & Start", onPress: async () => { await archiveTrip(trip); setTrip(createTrip()); } }
+        ]
+      );
+    } else {
+      setTrip(createTrip());
+    }
+  };
 
+  const handleToggle = (paymentId) => {
     setTrip(t => {
       if (!t) return t;
-      const updated = toggleChecked(t, paymentId);
-      const payment = updated.payments.find(p => p.id === paymentId);
-      paymentName = payment?.senderName || 'Payment';
-      isNowChecked = !!payment?.checked;
-      return updated;
+      return toggleChecked(t, paymentId);
     });
-
-    // Side effect OUTSIDE the updater
-    showToast(`${paymentName} ${isNowChecked ? 'verified ✓' : 'un-done'}`, paymentId);
-  };
-
-  const handleUndo = () => {
-    if (toast.paymentId) {
-      handleToggle(toast.paymentId); // Toggle back
-      setToast(prev => ({ ...prev, visible: false }));
-      if (toastTimer.current) clearTimeout(toastTimer.current);
-    }
   };
 
   const handleExpecting = (name, amount) => {
@@ -218,305 +261,132 @@ function App() {
     });
   };
 
-  const handleEndTrip = async () => {
-    if (!trip || trip.payments.length === 0) {
-      showToast('No payments to save');
-      return;
-    }
-
-    // Firebase Analytics: Log Trip End
-    /*
-    try {
-      await analytics().logEvent('trip_ended', {
-        total_ksh: getTripTotals(trip).totalCollected,
-        passengers: trip.payments.length
-      });
-    } catch(e) {}
-    */
-
-    await archiveTrip(trip);
-    setTrip(createTrip());
-    setSearchQuery('');
-    showToast('Trip saved to history');
+  const handleExpense = (category, amount) => {
+    setTrip(t => {
+      return addExpense(t || createTrip(), category, amount);
+    });
   };
 
-  const handleManualStart = async () => {
-    if (trip?.payments.length > 0) {
-      await archiveTrip(trip);
-    }
-    setTrip(createTrip());
-    setSearchQuery('');
-    showToast('New trip started');
+  const showToast = (message) => {
+    setToast({ visible: true, message });
+    setTimeout(() => setToast(prev => ({ ...prev, visible: false })), 3000);
   };
 
-  const handleFactoryReset = async () => {
-    await AsyncStorage.multiRemove([ACTIVE_KEY, HISTORY_KEY, '@pesalist_theme']);
-    setTrip(createTrip());
-    setHistory([]);
-    setShowAdmin(false);
-    showToast('All data cleared');
-  };
+  if (showHistory) return <HistoryScreen history={history} onBack={() => setShowHistory(false)} theme={theme} />;
 
-  const handleImportData = async (data) => {
-    try {
-      await AsyncStorage.setItem(HISTORY_KEY, JSON.stringify(data.history || []));
-      if (data.activeTrip) {
-        await AsyncStorage.setItem(ACTIVE_KEY, JSON.stringify(data.activeTrip));
-        setTrip(deserializeTrip(JSON.stringify(data.activeTrip)));
-      }
-      setHistory((data.history || []).map(deserializeTrip));
-      setShowAdmin(false);
-      showToast('Data imported successfully');
-    } catch (e) {
-      Alert.alert('Import Failed', e.message);
-    }
-  };
+  if (showAdmin) return (
+    <AdminScreen
+      history={history}
+      smsLog={smsLog}
+      onBack={() => setShowAdmin(false)}
+      onSync={checkMissed}
+      onSimulate={() => handleSms({ body: `SIM Confirmed. Received Ksh100 from TEST`, sender: 'MPESA' })}
+      theme={theme}
+    />
+  );
 
-  if (showHistory) {
-    return <HistoryScreen history={history} onBack={() => setShowHistory(false)} theme={theme} />;
-  }
-
-  if (showAdmin) {
-    return (
-      <AdminScreen
-        history={history}
-        smsLog={smsLog}
-        onBack={() => setShowAdmin(false)}
-        onReset={handleFactoryReset}
-        onImport={handleImportData}
-        onSimulate={() => handleSms({
-          body: `SIM_${Date.now()} Confirmed. You have received Ksh${Math.floor(Math.random()*500)+50} from ADMIN TEST On 1/8/26 New M-PESA balance is Ksh5000.`,
-          originatingAddress: 'MPESA',
-        })}
-        theme={theme}
-      />
-    );
-  }
+  if (!isLoaded) return (
+    <View style={[styles.container, { backgroundColor: theme.bg, justifyContent: 'center', alignItems: 'center' }]}>
+      <Text style={{ color: theme.textSecondary }}>Synchronizing Ledger...</Text>
+    </View>
+  );
 
   const allSorted = trip ? getAllPaymentsSorted(trip) : [];
   const searchResults = trip ? searchPayments(trip, searchQuery) : { payments: [], expected: [] };
   const isSearching = searchQuery.trim().length > 0;
   const displayPayments = isSearching ? searchResults.payments : allSorted;
-  const displayExpected = isSearching ? searchResults.expected : (trip ? trip.expected.filter(e => !e.matched) : []);
   const totals = trip ? getTripTotals(trip) : {};
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: theme.bg }]}>
-      <StatusBar barStyle={themeName === 'dark' ? 'light-content' : 'dark-content'} />
-
+    <View style={[styles.container, { backgroundColor: theme.bg }]}>
+      <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
       <LedgerHeader
         totals={{ ...totals, startedAt: trip?.startedAt }}
         onShowHistory={() => setShowHistory(true)}
         onManualStart={handleManualStart}
         onShowAdmin={() => setShowAdmin(true)}
+        isPrivacyMode={isPrivacyMode}
+        onTogglePrivacy={() => setIsPrivacyMode(!isPrivacyMode)}
         theme={theme}
-        themeName={themeName}
       />
+      {flashActive && <View style={styles.flashOverlay} />}
 
-      {/* Search Bar - Floating */}
       <View style={styles.searchContainer}>
         <View style={[styles.searchBox, { backgroundColor: '#fff', borderColor: '#D3D1C7' }]}>
           <Text style={{ fontSize: 16 }}>🔍</Text>
           <TextInput
             style={styles.searchInput}
-            placeholder="Search passenger..."
+            placeholder="Search last 4 digits or name..."
             placeholderTextColor="#888780"
             value={searchQuery}
             onChangeText={setSearchQuery}
             autoCapitalize="characters"
           />
-          <TouchableOpacity style={styles.micBtn}>
-            <Text style={{ fontSize: 16 }}>🎤</Text>
-          </TouchableOpacity>
         </View>
       </View>
 
-      {/* Payment List */}
       <FlatList
         data={displayPayments}
         keyExtractor={item => item.id}
-        renderItem={({ item }) => <PaymentCard payment={item} onToggle={handleToggle} theme={theme} />}
-        ListHeaderComponent={
-          <Text style={styles.sectionLabel}>TODAY</Text>
-        }
+        renderItem={({ item }) => (
+          <PaymentCard payment={item} onToggle={handleToggle} theme={theme} isBlurred={isPrivacyMode} />
+        )}
+        ListHeaderComponent={<Text style={styles.sectionLabel}>ACTIVITY</Text>}
         ListEmptyComponent={
           <View style={styles.empty}>
             <Text style={[styles.emptyText, { color: theme.textMuted }]}>
-              {isSearching ? 'No matches found' : 'No payments yet. Tap "Simulate M-Pesa SMS" to test.'}
+              {isSearching ? 'No matches' : 'No payments detected yet.\nEnsure background service is running.'}
             </Text>
+            {!isSearching && (
+               <TouchableOpacity onPress={handleManualStart} style={styles.startBtn}>
+                  <Text style={styles.startBtnText}>↺ Reset Trip</Text>
+               </TouchableOpacity>
+            )}
           </View>
         }
-        ListFooterComponent={
-          displayExpected.length > 0 ? (
-            <View style={styles.expectedSection}>
-              {displayExpected.map(exp => (
-                <View key={exp.id} style={styles.expectedRow}>
-                  <View style={[styles.statusLine, { backgroundColor: '#FAC775' }]} />
-                  <View style={styles.info}>
-                    <Text style={styles.expectedName}>Awaiting SMS ({exp.passengerName})</Text>
-                    <Text style={styles.expectedMeta}>Expected passenger</Text>
-                  </View>
-                  <Text style={styles.expectedAmt}>Ksh {exp.expectedAmount || 0}</Text>
-                  <Text style={{ fontSize: 18 }}>⏳</Text>
-                </View>
-              ))}
-            </View>
-          ) : null
-        }
-        style={styles.list}
         contentContainerStyle={{ paddingBottom: 160 }}
       />
 
-      {/* Debug simulate */}
-      {Platform.OS === 'android' && __DEV__ && (
-        <TouchableOpacity
-          onPress={() => handleSms({
-            body: 'S98GE969 Confirmed. You have received Ksh50 from TEST USER 254700000000 On 1/8/26 at 11:33 AM New M-PESA balance is Ksh500.',
-            originatingAddress: 'MPESA',
-          })}
-          style={[styles.simulateBtn, { backgroundColor: theme.surfaceHover }]}>
-          <Text style={[styles.simulateText, { color: theme.textSecondary }]}>🧪 Simulate M-Pesa SMS</Text>
-        </TouchableOpacity>
-      )}
-
-      {/* Bottom Bar */}
       <View style={[styles.bottom, { backgroundColor: '#fff', borderTopColor: '#EAF3DE' }]}>
         <View style={styles.actionRow}>
-          <TouchableOpacity 
-            onPress={() => setShowExpecting(true)} 
-            style={styles.expectingBtn}>
-            <Text style={{ fontSize: 16 }}>➕</Text>
-            <Text style={styles.expectingText}>Expecting</Text>
+          <TouchableOpacity onPress={() => setShowExpecting(true)} style={styles.actionIconBtn}>
+            <Text style={{ fontSize: 18 }}>➕</Text>
+            <Text style={styles.actionIconText}>Expect</Text>
           </TouchableOpacity>
-          <View style={{ flex: 1.4 }}>
-            <HoldToConfirmButton
-              label="End Trip"
-              onConfirm={handleEndTrip}
-              theme={{ ...theme, danger: '#0A6E2E' }}
-              danger={false}
-              icon="🏁"
-            />
+          <TouchableOpacity onPress={() => setShowExpenseModal(true)} style={styles.actionIconBtn}>
+            <Text style={{ fontSize: 18 }}>⛽</Text>
+            <Text style={styles.actionIconText}>Cost</Text>
+          </TouchableOpacity>
+          <View style={{ flex: 1.5 }}>
+            <HoldToConfirmButton label="End Trip" onConfirm={handleEndTrip} theme={theme} icon="🏁" />
           </View>
         </View>
       </View>
 
-      {/* Undo Toast */}
-      <Toast 
-        visible={toast.visible} 
-        message={toast.message} 
-        actionLabel="Undo" 
-        onAction={handleUndo}
-        theme={theme}
-      />
-
-      <ExpectingModal
-        visible={showExpecting}
-        onClose={() => setShowExpecting(false)}
-        onSubmit={handleExpecting}
-        theme={theme}
-      />
-    </SafeAreaView>
+      <Toast visible={toast.visible} message={toast.message} theme={theme} />
+      <ExpectingModal visible={showExpecting} onClose={() => setShowExpecting(false)} onSubmit={handleExpecting} theme={theme} />
+      <ExpenseModal visible={showExpenseModal} onClose={() => setShowExpenseModal(false)} onSubmit={handleExpense} theme={theme} />
+    </View>
   );
 }
 
 export default function AppWrapper() {
-  return (
-    <ErrorBoundary>
-      <App />
-    </ErrorBoundary>
-  );
+  return <ErrorBoundary><App /></ErrorBoundary>;
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  searchContainer: {
-    paddingHorizontal: 16,
-    marginTop: -14,
-    zIndex: 10,
-  },
-  searchBox: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderRadius: 12,
-    borderWidth: 0.5,
-    elevation: 4,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-  },
-  searchInput: {
-    flex: 1,
-    fontSize: 13,
-    paddingHorizontal: 8,
-  },
-  micBtn: { padding: 4 },
-  list: {
-    flex: 1,
-    backgroundColor: '#fff',
-    marginTop: 10,
-  },
-  sectionLabel: {
-    color: '#5F5E5A',
-    fontSize: 11,
-    fontWeight: '600',
-    letterSpacing: 0.5,
-    paddingHorizontal: 20,
-    marginTop: 16,
-    marginBottom: 8,
-  },
-  simulateBtn: {
-    position: 'absolute',
-    bottom: 120,
-    alignSelf: 'center',
-    padding: 10,
-    borderRadius: 10,
-    zIndex: 5,
-  },
-  simulateText: { fontSize: 13, fontWeight: '600' },
+  searchContainer: { paddingHorizontal: 16, marginTop: -14, zIndex: 10 },
+  searchBox: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 10, borderRadius: 12, borderWidth: 0.5, elevation: 4, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 4 },
+  searchInput: { flex: 1, fontSize: 13, paddingHorizontal: 8 },
+  sectionLabel: { color: '#5F5E5A', fontSize: 11, fontWeight: '600', letterSpacing: 0.5, paddingHorizontal: 20, marginTop: 16, marginBottom: 8 },
   empty: { padding: 50, alignItems: 'center' },
-  emptyText: { fontSize: 15, textAlign: 'center' },
-  expectedSection: { paddingVertical: 8 },
-  expectedRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-  },
-  statusLine: {
-    width: 4,
-    height: 36,
-    borderRadius: 2,
-    marginRight: 12,
-  },
-  info: { flex: 1 },
-  expectedName: { color: '#2C2C2A', fontSize: 14, fontWeight: '500' },
-  expectedMeta: { color: '#888780', fontSize: 11, marginTop: 2 },
-  expectedAmt: { color: '#854F0B', fontSize: 15, fontWeight: '600', marginRight: 10 },
-  bottom: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    padding: 16,
-    paddingBottom: 20,
-    borderTopWidth: 0.5,
-    elevation: 10,
-  },
+  emptyText: { fontSize: 15, textAlign: 'center', lineHeight: 22 },
+  startBtn: { marginTop: 20, backgroundColor: '#0A6E2E', paddingVertical: 12, paddingHorizontal: 24, borderRadius: 12 },
+  startBtnText: { color: '#fff', fontWeight: '700', fontSize: 14 },
+  flashOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: '#0E9F6E', opacity: 0.3, zIndex: 9999 },
+  bottom: { position: 'absolute', bottom: 0, left: 0, right: 0, padding: 16, paddingBottom: 20, borderTopWidth: 0.5, elevation: 10 },
   actionRow: { flexDirection: 'row', gap: 10 },
-  expectingBtn: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    paddingVertical: 14,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#639922',
-    backgroundColor: '#fff',
-  },
-  expectingText: { fontSize: 13, fontWeight: '600', color: '#3B6D11' },
+  actionIconBtn: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 10, borderRadius: 12, borderWidth: 1, borderColor: '#EAF3DE', backgroundColor: '#fff' },
+  actionIconText: { fontSize: 11, fontWeight: '600', color: '#5B6560', marginTop: 2 },
 });

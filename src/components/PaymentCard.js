@@ -3,11 +3,14 @@ import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 // import { Ionicons } from '@expo/vector-icons';
 
-export default function PaymentCard({ payment, onToggle, theme }) {
+export default function PaymentCard({ payment, onToggle, theme, isBlurred }) {
   const isChecked = payment.checked;
   const time = payment.receivedAt
     ? new Date(payment.receivedAt).toLocaleTimeString('en-KE', { hour: '2-digit', minute: '2-digit' })
     : '';
+
+  const displayName = isBlurred ? '•••••••• •••••' : payment.senderName;
+  const displayPhone = isBlurred ? '••••••••••••' : (payment.senderPhone || 'No Phone');
 
   return (
     <TouchableOpacity 
@@ -18,9 +21,9 @@ export default function PaymentCard({ payment, onToggle, theme }) {
       <View style={[styles.statusLine, { backgroundColor: isChecked ? '#639922' : '#B4B2A9' }]} />
 
       <View style={styles.info}>
-        <Text style={[styles.name, { color: '#2C2C2A' }]}>{payment.senderName}</Text>
+        <Text style={[styles.name, { color: '#2C2C2A' }]}>{displayName}</Text>
         <Text style={[styles.meta, { color: '#888780' }]}>
-          {payment.senderPhone || 'No Phone'} · {time}
+          {displayPhone} · {time}
         </Text>
       </View>
 

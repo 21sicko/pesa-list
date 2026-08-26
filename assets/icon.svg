@@ -1,0 +1,18 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Professional Rounded Background -->
+  <rect width="1024" height="1024" rx="220" fill="#0B0F0D"/>
+
+  <!-- Main Speech Bubble Shape - CENTER ALIGNED -->
+  <path d="M262 330C262 274.772 306.772 230 362 230H662C717.228 230 762 274.772 762 330V590C762 645.228 717.228 690 662 690H462L262 850V330Z" fill="#0A6E2E"/>
+
+  <!-- Phone Silhouette - CENTERED IN BUBBLE -->
+  <rect x="402" y="310" width="220" height="350" rx="35" fill="#0B0F0D" stroke="white" stroke-width="30"/>
+  <rect x="480" y="335" width="64" height="8" rx="4" fill="white"/>
+
+  <!-- High-Clarity Checkmark Bubble - TOP RIGHT ALIGNED -->
+  <circle cx="700" cy="380" r="110" fill="white" />
+  <path d="M645 380L685 435L755 270" stroke="#0A6E2E" stroke-width="45" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- App Name with Capital Start -->
+  <text x="512" y="940" text-anchor="middle" fill="#fff" font-family="Arial, Helvetica, sans-serif" font-weight="bold" font-size="65">Pesa list</text>
+</svg>
