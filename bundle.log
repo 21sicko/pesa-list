@@ -1,0 +1,6 @@
+env: load .env.local
+env: export SENTRY_AUTH_TOKEN
+Starting Metro Bundler
+Android Bundled 10223ms node_modules\expo\AppEntry.js (599 modules)
+Writing bundle output to: android/app/src/main/assets/index.android.bundle
+Done writing bundle output

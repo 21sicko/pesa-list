@@ -7,60 +7,93 @@ export async function exportTripToPdf(trip) {
   const date = new Date(trip.startedAt).toLocaleDateString('en-KE');
   const time = new Date(trip.startedAt).toLocaleTimeString('en-KE', { hour: '2-digit', minute: '2-digit' });
 
-  const rows = trip.payments.map((p, i) => `
-    <tr style="border-bottom: 1px solid #EAF3DE;">
-      <td style="padding: 10px 0; color: #5F5E5A;">${i + 1}</td>
-      <td style="padding: 10px 0;">
-        <div style="font-weight: 500; color: #2C2C2A;">${p.senderName}</div>
-        <div style="font-size: 11px; color: #888780;">${p.senderPhone || ''}</div>
-      </td>
-      <td style="padding: 10px 0; color: #888780; font-size: 12px;">${new Date(p.receivedAt).toLocaleTimeString('en-KE', { hour: '2-digit', minute: '2-digit' })}</td>
-      <td style="padding: 10px 0; text-align: right; font-weight: 500; color: ${p.checked ? '#3B6D11' : '#2C2C2A'};">
-        Ksh ${p.amount?.toLocaleString() || 0}
-      </td>
-      <td style="padding: 10px 0; text-align: right;">${p.checked ? '✅' : '⏳'}</td>
-    </tr>
-  `).join('');
+  const rows = trip.payments.map((p, i) => {
+    const isSent = p.type === 'SENT';
+    const amountColor = isSent ? '#DC2626' : (p.checked ? '#3B6D11' : '#2C2C2A');
+    const typeLabel = isSent ? 'SENT' : 'RCVD';
+    const sign = isSent ? '-' : '+';
+    const payDate = new Date(p.receivedAt).toLocaleDateString('en-KE', { day: 'numeric', month: 'short' });
+    const payTime = new Date(p.receivedAt).toLocaleTimeString('en-KE', { hour: '2-digit', minute: '2-digit' });
+
+    return `
+      <tr style="border-bottom: 1px solid #EAF3DE;">
+        <td style="padding: 12px 0; color: #5F5E5A; font-size: 11px;">${i + 1}</td>
+        <td style="padding: 12px 0;">
+          <div style="font-weight: 600; color: #2C2C2A; font-size: 14px;">${p.senderName}</div>
+          <div style="font-size: 10px; color: #888780;">${typeLabel} · ${p.senderPhone || 'No Phone'}</div>
+        </td>
+        <td style="padding: 12px 0; color: #5F5E5A; font-size: 11px;">${payDate}<br/>${payTime}</td>
+        <td style="padding: 12px 0; text-align: right; font-weight: bold; color: ${amountColor}; font-size: 14px;">
+          ${sign}Ksh ${p.amount?.toLocaleString() || 0}
+        </td>
+        <td style="padding: 12px 0; text-align: right; font-size: 16px;">${p.checked ? '✅' : (isSent ? '💸' : '⏳')}</td>
+      </tr>
+    `;
+  }).join('');
 
   const html = `
     <html>
       <head>
         <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no" />
         <style>
-          body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; padding: 20px; color: #2C2C2A; }
-          .header { background: #0A6E2E; padding: 20px; border-radius: 0 0 20px 20px; color: white; margin-bottom: 30px; }
-          .title { font-size: 18px; margin: 0; }
-          .total-label { color: #C0DD97; font-size: 12px; margin: 15px 0 5px; }
-          .total-amt { font-size: 32px; font-weight: bold; margin: 0; }
-          .stats { display: flex; gap: 20px; margin-top: 10px; font-size: 12px; color: #EAF3DE; }
-          table { width: 100%; border-collapse: collapse; }
-          th { text-align: left; font-size: 11px; color: #5F5E5A; border-bottom: 1px solid #D3D1C7; padding-bottom: 10px; }
+          body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; padding: 30px; color: #2C2C2A; }
+          .header { background: #0A6E2E; padding: 25px; border-radius: 15px; color: white; margin-bottom: 30px; }
+          .title { font-size: 24px; font-weight: 800; margin: 0; letter-spacing: 1px; }
+          .subtitle { color: #C0DD97; font-size: 12px; margin-top: 5px; font-weight: 600; }
+          .main-stats { display: flex; justify-content: space-between; margin-top: 25px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 20px; }
+          .stat-box { flex: 1; }
+          .stat-label { color: #C0DD97; font-size: 9px; font-weight: 800; text-transform: uppercase; }
+          .stat-val { font-size: 18px; font-weight: bold; margin-top: 4px; }
+          .net-profit { background: rgba(255,255,255,0.1); padding: 15px; border-radius: 10px; margin-top: 20px; text-align: center; }
+          table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+          th { text-align: left; font-size: 10px; color: #888780; border-bottom: 2px solid #EAF3DE; padding-bottom: 12px; font-weight: 800; text-transform: uppercase; }
+          .footer { margin-top: 40px; text-align: center; font-size: 10px; color: #B4B2A9; border-top: 1px solid #EAF3DE; padding-top: 20px; }
         </style>
       </head>
       <body>
         <div class="header">
-          <p class="title">Pesa List - Trip Record</p>
-          <p class="total-label">Total collected on ${date}</p>
-          <p class="total-amt">Ksh ${totals.totalCollected.toLocaleString()}</p>
-          <div class="stats">
-            <span>${totals.totalPayments} passengers</span>
-            <span>Started at ${time}</span>
+          <p class="title">PESALIST</p>
+          <p class="subtitle">Official Trip & Accounting Statement</p>
+
+          <div class="main-stats">
+            <div class="stat-box">
+              <p class="stat-label">Received</p>
+              <p class="stat-val">Ksh ${totals.totalCollected.toLocaleString()}</p>
+            </div>
+            <div class="stat-box">
+              <p class="stat-label">Sent/Paybill</p>
+              <p class="stat-val" style="color: #FFB2B2;">Ksh ${totals.totalSent.toLocaleString()}</p>
+            </div>
+            <div class="stat-box">
+              <p class="stat-label">Expenses</p>
+              <p class="stat-val" style="color: #FFB2B2;">Ksh ${totals.totalExpenses.toLocaleString()}</p>
+            </div>
+          </div>
+
+          <div class="net-profit">
+            <p class="stat-label">Net Financial Position</p>
+            <p class="stat-val" style="font-size: 28px;">Ksh ${totals.netProfit.toLocaleString()}</p>
           </div>
         </div>
+
         <table>
           <thead>
             <tr>
-              <th style="width: 30px;">#</th>
-              <th>PASSENGER</th>
-              <th>TIME</th>
+              <th style="width: 25px;">#</th>
+              <th>TRANSACTION</th>
+              <th>DATE</th>
               <th style="text-align: right;">AMOUNT</th>
-              <th style="text-align: right; width: 40px;">STATUS</th>
+              <th style="text-align: right; width: 40px;">ST.</th>
             </tr>
           </thead>
           <tbody>
             ${rows}
           </tbody>
         </table>
+
+        <div class="footer">
+          <p>Generated by Pesa List App on ${date} · Total ${totals.totalPayments} received transactions processed.</p>
+        </div>
       </body>
     </html>
   `;

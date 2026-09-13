@@ -5,21 +5,15 @@ import android.net.Uri
 import android.os.Build
 import android.os.PowerManager
 import android.provider.Settings
-import com.facebook.react.bridge.Promise
-import com.facebook.react.bridge.ReactApplicationContext
-import com.facebook.react.bridge.ReactContextBaseJavaModule
-import com.facebook.react.bridge.ReactMethod
+import com.facebook.react.bridge.*
+import org.json.JSONArray
+import org.json.JSONObject
 
 class SmsBridgeModule(reactContext: ReactApplicationContext) :
     ReactContextBaseJavaModule(reactContext) {
 
     override fun getName() = "SmsBridge"
 
-    /**
-     * Returns all queued messages captured while the app was backgrounded/killed,
-     * AND clears the queue (so each message is only ever delivered to JS once).
-     * Call this on app mount and whenever AppState becomes "active".
-     */
     @ReactMethod
     fun drainStoredMessages(promise: Promise) {
         try {
@@ -31,9 +25,42 @@ class SmsBridgeModule(reactContext: ReactApplicationContext) :
     }
 
     /**
-     * Same as drainStoredMessages but does NOT clear the queue.
-     * Useful for debugging / the debug dashboard without consuming messages.
+     * Reads messages from the actual SMS inbox within a specific time range.
+     * Optimized: Filters for "Confirmed" and M-Pesa keywords at the SQL level.
      */
+    @ReactMethod
+    fun readInboxRange(dateFrom: Double, dateTo: Double, promise: Promise) {
+        try {
+            val cursor = reactApplicationContext.contentResolver.query(
+                Uri.parse("content://sms/inbox"),
+                arrayOf("address", "body", "date"),
+                "date >= ? AND date <= ? AND (body LIKE '%Confirmed%' OR body LIKE '%received%' OR body LIKE '%sent%')",
+                arrayOf(dateFrom.toLong().toString(), dateTo.toLong().toString()),
+                "date DESC"
+            )
+
+            val arr = JSONArray()
+            if (cursor != null && cursor.moveToFirst()) {
+                do {
+                    val body = cursor.getString(1)
+                    val sender = cursor.getString(0)
+                    // Final safety filter
+                    if (sender.contains("MPESA", ignoreCase = true) || body.contains("M-PESA", ignoreCase = true)) {
+                        val entry = JSONObject()
+                        entry.put("originatingAddress", sender)
+                        entry.put("body", body)
+                        entry.put("timestamp", cursor.getLong(2))
+                        arr.put(entry)
+                    }
+                } while (cursor.moveToNext())
+                cursor.close()
+            }
+            promise.resolve(arr.toString())
+        } catch (e: Exception) {
+            promise.reject("READ_INBOX_FAILED", e)
+        }
+    }
+
     @ReactMethod
     fun peekStoredMessages(promise: Promise) {
         try {
@@ -44,12 +71,6 @@ class SmsBridgeModule(reactContext: ReactApplicationContext) :
         }
     }
 
-    /**
-     * Opens the OS dialog asking the user to exempt this app from battery
-     * optimization. Should be called once, e.g. during onboarding, with an
-     * explanation shown to the user first (Android requires user consent —
-     * this cannot be silently auto-granted).
-     */
     @ReactMethod
     fun requestIgnoreBatteryOptimizations() {
         val context = reactApplicationContext

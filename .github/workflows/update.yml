@@ -1,0 +1,32 @@
+name: Pesa List Remote Update
+
+on:
+  push:
+    branches:
+      - main  # Every push to the main branch updates the app
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: ?? Checkout repository
+        uses: actions/checkout@v4
+
+      - name: ?? Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+          cache: 'npm'
+
+      - name: ?? Setup Expo
+        uses: expo/expo-github-action@v8
+        with:
+          expo-version: latest
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: ?? Install dependencies
+        run: npm install
+
+      - name: ?? Push Remote Update
+        run: eas update --branch production --message "Automated update from GitHub"

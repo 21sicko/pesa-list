@@ -46,7 +46,7 @@ export default function HoldToConfirmButton({
     }
   }, []);
 
-  const bgColor = danger ? theme.danger : theme.primary;
+  const bgColor = danger ? (theme?.danger || '#DC2626') : (theme?.primary || '#0A6E2E');
   const progressWidth = progress.interpolate({
     inputRange: [0, 1],
     outputRange: ['0%', '100%'],

@@ -1,11 +1,12 @@
-// App.js — Pesa List: Hardened & Professionally Digitized
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+// App.js — Professional Business & Debt Management Suite
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
   View, Text, FlatList, TextInput, TouchableOpacity,
   StyleSheet, SafeAreaView, StatusBar, Alert, Platform, KeyboardAvoidingView, PermissionsAndroid,
-  AppRegistry, AppState, Vibration, BackHandler, NativeModules
+  AppRegistry, AppState, Vibration, BackHandler, NativeModules, SectionList
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Updates from 'expo-updates';
 
 import { useSmsListener, requestBackgroundReliability } from './src/hooks/useSmsListener';
 import { useTheme } from './src/hooks/useTheme';
@@ -18,6 +19,7 @@ import HistoryScreen from './src/screens/HistoryScreen';
 import HoldToConfirmButton from './src/components/HoldToConfirmButton';
 import AdminScreen from './src/screens/AdminScreen';
 import ErrorBoundary from './src/ErrorBoundary';
+import analytics from '@react-native-firebase/analytics';
 
 import {
   createTrip, endTrip,  addPayment, addExpectedPayment, addExpense,
@@ -29,28 +31,8 @@ import {
 const ACTIVE_KEY = '@fv_active_trip';
 const HISTORY_KEY = '@fv_history';
 
-// BACKGROUND SMS HANDLER (Headless JS)
-const SmsBackgroundEvent = async (data) => {
-  try {
-    const { body, sender } = data;
-    // We try to process it, but the NATIVE side now also caches it in SharedPreferences
-    // as a fail-safe. This Headless JS part is for real-time UI updates if the app is
-    // backgrounded but JS engine is alive.
-    const saved = await AsyncStorage.getItem(ACTIVE_KEY);
-    if (!saved) return;
-
-    let trip = deserializeTrip(saved);
-    const result = addPayment(trip, body, sender);
-    if (result.added) {
-      await AsyncStorage.setItem(ACTIVE_KEY, serializeTrip(result.trip));
-    }
-  } catch (e) {}
-};
-
-AppRegistry.registerHeadlessTask('SmsBackgroundEvent', () => SmsBackgroundEvent);
-
 function App() {
-  const { theme, themeName, toggleTheme } = useTheme();
+  const { theme, themeName } = useTheme();
   const [trip, setTrip] = useState(null);
   const [isLoaded, setIsLoaded] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -62,34 +44,58 @@ function App() {
   const [history, setHistory] = useState([]);
   const [smsLog, setSmsLog] = useState([]);
   const [flashActive, setFlashActive] = useState(false);
+  const [toast, setToast] = useState({ visible: false, message: '' });
+  const [activeTab, setActiveTab] = useState('IN');
 
-  // Undo toast state
-  const [toast, setToast] = useState({ visible: false, message: '', paymentId: null });
-  const toastTimer = useRef(null);
-
-  // NATIVE MISSED MESSAGE SWEEP
-  const checkMissed = useCallback(async () => {
-    const { SmsBridge } = NativeModules;
-    if (!SmsBridge) return;
-
-    try {
-      const json = await SmsBridge.drainStoredMessages();
-      const missed = JSON.parse(json);
-      if (missed && missed.length > 0) {
-        setTrip(currentTrip => {
-          if (!currentTrip) return currentTrip;
-          let updated = currentTrip;
-          missed.forEach(msg => {
-            const result = addPayment(updated, msg.body, msg.originatingAddress);
-            updated = result.trip;
-          });
-          return { ...updated };
-        });
-      }
-    } catch (e) {}
+  // OTA Update Check
+  useEffect(() => {
+    async function onFetchUpdateAsync() {
+      try {
+        const update = await Updates.checkForUpdateAsync();
+        if (update.isAvailable) {
+          Alert.alert('Update Available', 'A new version of Pesa List is available. Update now?',
+            [{ text: 'Later' }, { text: 'Update', onPress: async () => { await Updates.fetchUpdateAsync(); await Updates.reloadAsync(); }}]
+          );
+        }
+      } catch (e) {}
+    }
+    if (!__DEV__) onFetchUpdateAsync();
   }, []);
 
-  // Handle Back Button
+  const processAndSetTrip = useCallback((msg, currentTrip) => {
+    if (!currentTrip) return null;
+    const result = addPayment(currentTrip, msg.body, msg.originatingAddress, msg.timestamp);
+    if (result.added) {
+        if (result.payment.type === 'SENT' && activeTab === 'IN') setActiveTab('OUT');
+        if (result.payment.type === 'RECEIVED' && activeTab === 'OUT') setActiveTab('IN');
+    }
+    return result;
+  }, [activeTab]);
+
+  const handleLiveSms = useCallback(async (message) => {
+    Vibration.vibrate(message.body.includes('Ksh 1,000') ? [0, 200, 100, 200] : [0, 100]);
+    setFlashActive(true);
+    setTimeout(() => setFlashActive(false), 800);
+    setTrip(currentTrip => {
+      const result = processAndSetTrip(message, currentTrip || createTrip());
+      return result ? result.trip : currentTrip;
+    });
+  }, [processAndSetTrip]);
+
+  const { syncManual } = useSmsListener(handleLiveSms);
+
+  const handleHistoricalSync = useCallback(async (messages) => {
+    setTrip(currentTrip => {
+      let updated = currentTrip || createTrip();
+      const sorted = [...messages].sort((a, b) => a.timestamp - b.timestamp);
+      sorted.forEach(msg => {
+        const result = addPayment(updated, msg.body, msg.originatingAddress, msg.timestamp);
+        updated = result.trip;
+      });
+      return { ...updated };
+    });
+  }, []);
+
   useEffect(() => {
     const backAction = () => {
       if (showAdmin) { setShowAdmin(false); return true; }
@@ -102,35 +108,6 @@ function App() {
     return () => backHandler.remove();
   }, [showAdmin, showHistory, showExpecting, showExpenseModal]);
 
-  // Refresh data on foreground
-  useEffect(() => {
-    const subscription = AppState.addEventListener('change', async (nextAppState) => {
-      if (nextAppState === 'active') {
-        await checkMissed();
-      }
-    });
-    return () => subscription.remove();
-  }, [checkMissed]);
-
-  // Battery Optimization Check
-  useEffect(() => {
-    if (Platform.OS === 'android') {
-      requestBackgroundReliability().then(isIgnoring => {
-        if (!isIgnoring) {
-          Alert.alert(
-            "Keep Pesa List Alive",
-            "To record payments while your screen is off, please disable battery optimization for Pesa List.",
-            [
-              { text: "Later", style: "cancel" },
-              { text: "Fix Now", onPress: () => requestBackgroundReliability() }
-            ]
-          );
-        }
-      });
-    }
-  }, []);
-
-  // INITIAL LOAD
   useEffect(() => {
     (async () => {
       try {
@@ -140,36 +117,21 @@ function App() {
             PermissionsAndroid.PERMISSIONS.READ_SMS,
             PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS
           ]);
-          const { SmsForegroundModule } = NativeModules;
-          if (SmsForegroundModule) await SmsForegroundModule.startService();
         }
-
-        const [saved, hist] = await Promise.all([
-          AsyncStorage.getItem(ACTIVE_KEY),
-          AsyncStorage.getItem(HISTORY_KEY)
-        ]);
-
+        try { await analytics().logAppOpen(); } catch(e) {}
+        const [saved, hist] = await Promise.all([ AsyncStorage.getItem(ACTIVE_KEY), AsyncStorage.getItem(HISTORY_KEY) ]);
         let initialTrip = saved ? deserializeTrip(saved) : createTrip();
-        if (shouldAutoEnd(initialTrip)) {
-          await archiveTrip(initialTrip);
-          initialTrip = createTrip();
-        }
+        if (shouldAutoEnd(initialTrip)) { await archiveTrip(initialTrip); initialTrip = createTrip(); }
         setTrip(initialTrip);
-
-        if (hist) setHistory(JSON.parse(hist).map(deserializeTrip));
+        if (hist) setHistory(JSON.parse(hist).map(h => typeof h === 'string' ? deserializeTrip(h) : h));
+        setTimeout(syncManual, 1000);
         setIsLoaded(true);
-      } catch (e) {
-        setTrip(createTrip());
-        setIsLoaded(true);
-      }
+      } catch (e) { setTrip(createTrip()); setIsLoaded(true); }
     })();
-  }, []);
+  }, [syncManual]);
 
-  // SAFE AUTO-SAVE (Prevents state erasure)
   useEffect(() => {
-    if (isLoaded && trip && trip.id) {
-      AsyncStorage.setItem(ACTIVE_KEY, serializeTrip(trip)).catch(() => {});
-    }
+    if (isLoaded && trip) AsyncStorage.setItem(ACTIVE_KEY, serializeTrip(trip)).catch(() => {});
   }, [trip, isLoaded]);
 
   const archiveTrip = async (t) => {
@@ -177,128 +139,86 @@ function App() {
     try {
       const hist = await AsyncStorage.getItem(HISTORY_KEY);
       const arr = hist ? JSON.parse(hist) : [];
-      arr.unshift(serializeTrip(ended));
-      if (arr.length > 50) arr.pop();
-      await AsyncStorage.setItem(HISTORY_KEY, JSON.stringify(arr));
-      setHistory(arr.map(deserializeTrip));
+      const cleanArr = arr.map(item => typeof item === 'string' ? JSON.parse(item) : item);
+      cleanArr.unshift(ended);
+      if (cleanArr.length > 50) cleanArr.pop();
+      await AsyncStorage.setItem(HISTORY_KEY, JSON.stringify(cleanArr));
+      setHistory(cleanArr);
     } catch (e) {}
     await AsyncStorage.removeItem(ACTIVE_KEY);
   };
 
-  const handleSms = useCallback(async (message) => {
-    // Update SMS Debug Log for Admin
-    setSmsLog(prev => [{
-      time: message.timestamp || Date.now(),
-      body: message.body
-    }, ...prev].slice(0, 15));
-
-    Vibration.vibrate([0, 200, 100, 200]);
-    setFlashActive(true);
-    setTimeout(() => setFlashActive(false), 800);
-
-    setTrip(currentTrip => {
-      if (!currentTrip) return currentTrip;
-      const result = addPayment(currentTrip, message.body, message.originatingAddress);
-      return result.trip;
-    });
-  }, []);
-
-  useSmsListener(handleSms);
-
   const handleEndTrip = async () => {
-    if (!trip || (trip.payments.length === 0 && trip.expenses.length === 0)) {
-      showToast('No data to save');
-      return;
-    }
-
-    Alert.alert(
-      "Confirm End Trip",
-      "This will save your current ledger to history and start a fresh one.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "End Trip",
-          onPress: async () => {
-            setIsLoaded(false); // Gate saves
-            await archiveTrip(trip);
-            setTrip(createTrip());
-            setIsLoaded(true);
-            showToast('Trip archived');
-          }
-        }
-      ]
+    if (!trip || (trip.payments.length === 0 && trip.expenses.length === 0)) { showToast('No data to save'); return; }
+    try {
+      const totals = getTripTotals(trip);
+      await analytics().logEvent('trip_ended', { total_ksh: totals.totalCollected, sent_ksh: totals.totalSent, passengers: trip.payments.length });
+    } catch(e) {}
+    Alert.alert("End Trip?", "Save current data to history.",
+      [{ text: "Cancel" }, { text: "End", onPress: async () => { setIsLoaded(false); await archiveTrip(trip); setTrip(createTrip()); setIsLoaded(true); showToast('Trip archived'); }}]
     );
   };
 
   const handleManualStart = async () => {
-    const hasData = trip?.payments.length > 0 || trip?.expenses.length > 0;
+    const hasData = (trip?.payments.length > 0 || trip?.expenses.length > 0);
     if (hasData) {
-      Alert.alert(
-        "Save Current Trip?",
-        "Should we save your current data to history first?",
-        [
-          { text: "Cancel", style: "cancel" },
-          { text: "Discard", style: "destructive", onPress: () => setTrip(createTrip()) },
-          { text: "Save & Start", onPress: async () => { await archiveTrip(trip); setTrip(createTrip()); } }
-        ]
+      Alert.alert("New Trip?", "Save current data first?",
+        [{ text: "Discard", style: 'destructive', onPress: () => setTrip(createTrip()) },
+         { text: "Save", onPress: async () => { await archiveTrip(trip); setTrip(createTrip()); }}]
       );
-    } else {
-      setTrip(createTrip());
-    }
+    } else { setTrip(createTrip()); }
   };
 
-  const handleToggle = (paymentId) => {
-    setTrip(t => {
-      if (!t) return t;
-      return toggleChecked(t, paymentId);
-    });
-  };
-
-  const handleExpecting = (name, amount) => {
-    setTrip(t => {
-      const result = addExpectedPayment(t || createTrip(), name, amount);
-      return result.trip;
-    });
-  };
-
-  const handleExpense = (category, amount) => {
-    setTrip(t => {
-      return addExpense(t || createTrip(), category, amount);
-    });
-  };
-
-  const showToast = (message) => {
-    setToast({ visible: true, message });
-    setTimeout(() => setToast(prev => ({ ...prev, visible: false })), 3000);
-  };
+  const handleToggle = (id) => setTrip(t => toggleChecked(t, id));
+  const handleExpecting = (n, a) => setTrip(t => addExpectedPayment(t, n, a).trip);
+  const handleExpense = (c, a) => setTrip(t => addExpense(t, c, a));
+  const showToast = (m) => { setToast({ visible: true, message: m }); setTimeout(() => setToast({ visible: false, message: '' }), 3000); };
 
   if (showHistory) return <HistoryScreen history={history} onBack={() => setShowHistory(false)} theme={theme} />;
-
   if (showAdmin) return (
     <AdminScreen
       history={history}
       smsLog={smsLog}
       onBack={() => setShowAdmin(false)}
-      onSync={checkMissed}
-      onSimulate={() => handleSms({ body: `SIM Confirmed. Received Ksh100 from TEST`, sender: 'MPESA' })}
+      onSync={syncManual}
+      onSyncHistorical={handleHistoricalSync}
+      onSimulate={() => handleLiveSms({ body: 'Confirmed. Received Ksh100 from TEST', originatingAddress: 'MPESA', timestamp: Date.now() })}
+      onReset={async () => { await AsyncStorage.multiRemove([ACTIVE_KEY, HISTORY_KEY]); setTrip(createTrip()); setHistory([]); setShowAdmin(false); Alert.alert('Reset Success', 'All data cleared.'); }}
+      onImport={async (data) => {
+        if (data.activeTrip) await AsyncStorage.setItem(ACTIVE_KEY, serializeTrip(data.activeTrip));
+        if (data.history) await AsyncStorage.setItem(HISTORY_KEY, JSON.stringify(data.history));
+        setTrip(data.activeTrip || createTrip());
+        setHistory(data.history || []);
+        setShowAdmin(false);
+        Alert.alert('Import Success', 'Data restored.');
+      }}
+      onUpdateFulizaLimit={(limit) => setTrip(t => ({ ...t, fulizaLimit: limit }))}
+      currentFulizaLimit={trip?.fulizaLimit || 0}
       theme={theme}
     />
   );
 
-  if (!isLoaded) return (
-    <View style={[styles.container, { backgroundColor: theme.bg, justifyContent: 'center', alignItems: 'center' }]}>
-      <Text style={{ color: theme.textSecondary }}>Synchronizing Ledger...</Text>
-    </View>
-  );
+  if (!isLoaded) return <View style={[styles.container, { backgroundColor: '#0B0F0D', justifyContent: 'center', alignItems: 'center' }]}><Text style={{ color: '#fff', fontSize: 16 }}>Readying Ledger...</Text></View>;
 
-  const allSorted = trip ? getAllPaymentsSorted(trip) : [];
   const searchResults = trip ? searchPayments(trip, searchQuery) : { payments: [], expected: [] };
-  const isSearching = searchQuery.trim().length > 0;
-  const displayPayments = isSearching ? searchResults.payments : allSorted;
-  const totals = trip ? getTripTotals(trip) : {};
+  const allPayments = getAllPaymentsSorted(trip);
+  const filteredPayments = (searchQuery ? searchResults.payments : allPayments).filter(p => activeTab === 'IN' ? p.type === 'RECEIVED' : p.type === 'SENT');
+
+  // Group by Date for Neatness
+  const sections = [];
+  const groups = filteredPayments.reduce((acc, p) => {
+    const d = new Date(p.receivedAt).toLocaleDateString('en-KE', { day: 'numeric', month: 'short' });
+    if (!acc[d]) acc[d] = [];
+    acc[d].push(p);
+    return acc;
+  }, {});
+  Object.keys(groups).forEach(date => sections.push({ title: date, data: groups[date] }));
+
+  const totals = getTripTotals(trip);
+  const topEarnerId = trip?.payments.filter(p => p.type === 'RECEIVED').sort((a,b) => b.amount - a.amount)[0]?.id;
 
   return (
-    <View style={[styles.container, { backgroundColor: theme.bg }]}>
+    <View style={[styles.container, { backgroundColor: '#F6F8F7' }]}>
       <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
       <LedgerHeader
         totals={{ ...totals, startedAt: trip?.startedAt }}
@@ -307,59 +227,35 @@ function App() {
         onShowAdmin={() => setShowAdmin(true)}
         isPrivacyMode={isPrivacyMode}
         onTogglePrivacy={() => setIsPrivacyMode(!isPrivacyMode)}
-        theme={theme}
       />
       {flashActive && <View style={styles.flashOverlay} />}
 
-      <View style={styles.searchContainer}>
-        <View style={[styles.searchBox, { backgroundColor: '#fff', borderColor: '#D3D1C7' }]}>
-          <Text style={{ fontSize: 16 }}>🔍</Text>
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Search last 4 digits or name..."
-            placeholderTextColor="#888780"
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-            autoCapitalize="characters"
-          />
+      <View style={styles.viewContainer}>
+        <View style={styles.searchBar}>
+          <Text>🔍</Text>
+          <TextInput style={styles.searchInput} placeholder="Search ledger..." value={searchQuery} onChangeText={setSearchQuery} autoCapitalize="characters" />
+        </View>
+        <View style={styles.segmentedTab}>
+          <TouchableOpacity onPress={() => setActiveTab('IN')} style={[styles.tab, activeTab === 'IN' && styles.tabActiveIn]}><Text style={[styles.tabText, activeTab === 'IN' && styles.tabTextActiveIn]}>IN</Text></TouchableOpacity>
+          <TouchableOpacity onPress={() => setActiveTab('OUT')} style={[styles.tab, activeTab === 'OUT' && styles.tabActiveOut]}><Text style={[styles.tabText, activeTab === 'OUT' && styles.tabTextActiveOut]}>OUT</Text></TouchableOpacity>
         </View>
       </View>
 
-      <FlatList
-        data={displayPayments}
+      <SectionList
+        sections={sections}
         keyExtractor={item => item.id}
-        renderItem={({ item }) => (
-          <PaymentCard payment={item} onToggle={handleToggle} theme={theme} isBlurred={isPrivacyMode} />
-        )}
-        ListHeaderComponent={<Text style={styles.sectionLabel}>ACTIVITY</Text>}
-        ListEmptyComponent={
-          <View style={styles.empty}>
-            <Text style={[styles.emptyText, { color: theme.textMuted }]}>
-              {isSearching ? 'No matches' : 'No payments detected yet.\nEnsure background service is running.'}
-            </Text>
-            {!isSearching && (
-               <TouchableOpacity onPress={handleManualStart} style={styles.startBtn}>
-                  <Text style={styles.startBtnText}>↺ Reset Trip</Text>
-               </TouchableOpacity>
-            )}
-          </View>
-        }
+        renderItem={({ item }) => <PaymentCard payment={item} onToggle={handleToggle} isBlurred={isPrivacyMode} isTopEarner={item.id === topEarnerId} theme={theme} />}
+        renderSectionHeader={({ section: { title } }) => <Text style={styles.sectionLabel}>{title}</Text>}
+        ListEmptyComponent={<View style={styles.empty}><Text style={styles.emptyText}>{searchQuery ? 'No matches' : 'No entries yet.'}</Text></View>}
         contentContainerStyle={{ paddingBottom: 160 }}
+        stickySectionHeadersEnabled={false}
       />
 
-      <View style={[styles.bottom, { backgroundColor: '#fff', borderTopColor: '#EAF3DE' }]}>
+      <View style={styles.bottom}>
         <View style={styles.actionRow}>
-          <TouchableOpacity onPress={() => setShowExpecting(true)} style={styles.actionIconBtn}>
-            <Text style={{ fontSize: 18 }}>➕</Text>
-            <Text style={styles.actionIconText}>Expect</Text>
-          </TouchableOpacity>
-          <TouchableOpacity onPress={() => setShowExpenseModal(true)} style={styles.actionIconBtn}>
-            <Text style={{ fontSize: 18 }}>⛽</Text>
-            <Text style={styles.actionIconText}>Cost</Text>
-          </TouchableOpacity>
-          <View style={{ flex: 1.5 }}>
-            <HoldToConfirmButton label="End Trip" onConfirm={handleEndTrip} theme={theme} icon="🏁" />
-          </View>
+          <TouchableOpacity onPress={() => setShowExpecting(true)} style={styles.actionIconBtn}><Text>➕</Text><Text style={styles.actionIconText}>Expect</Text></TouchableOpacity>
+          <TouchableOpacity onPress={() => setShowExpenseModal(true)} style={styles.actionIconBtn}><Text>⛽</Text><Text style={styles.actionIconText}>Cost</Text></TouchableOpacity>
+          <View style={{ flex: 1.5 }}><HoldToConfirmButton label="End Trip" onConfirm={handleEndTrip} icon="🏁" theme={theme} /></View>
         </View>
       </View>
 
@@ -370,23 +266,26 @@ function App() {
   );
 }
 
-export default function AppWrapper() {
-  return <ErrorBoundary><App /></ErrorBoundary>;
-}
+export default function AppWrapper() { return <ErrorBoundary><App /></ErrorBoundary>; }
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  searchContainer: { paddingHorizontal: 16, marginTop: -14, zIndex: 10 },
-  searchBox: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 10, borderRadius: 12, borderWidth: 0.5, elevation: 4, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 4 },
+  viewContainer: { paddingHorizontal: 16, marginTop: -14, zIndex: 10 },
+  searchBar: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 10, borderRadius: 12, borderWidth: 0.5, borderColor: '#D3D1C7', backgroundColor: '#fff', elevation: 4 },
   searchInput: { flex: 1, fontSize: 13, paddingHorizontal: 8 },
-  sectionLabel: { color: '#5F5E5A', fontSize: 11, fontWeight: '600', letterSpacing: 0.5, paddingHorizontal: 20, marginTop: 16, marginBottom: 8 },
+  segmentedTab: { flexDirection: 'row', marginTop: 12, backgroundColor: '#fff', borderRadius: 10, padding: 2, borderWidth: 1, borderColor: '#EAF3DE' },
+  tab: { flex: 1, alignItems: 'center', paddingVertical: 8, borderRadius: 8 },
+  tabActiveIn: { backgroundColor: '#F0F9EB' },
+  tabActiveOut: { backgroundColor: '#FEF2F2' },
+  tabText: { fontSize: 9, fontWeight: '900', color: '#888780', letterSpacing: 1 },
+  tabTextActiveIn: { color: '#0A6E2E' },
+  tabTextActiveOut: { color: '#DC2626' },
+  sectionLabel: { color: '#5F5E5A', fontSize: 10, fontWeight: '800', paddingHorizontal: 20, marginTop: 15, marginBottom: 4, letterSpacing: 1 },
   empty: { padding: 50, alignItems: 'center' },
-  emptyText: { fontSize: 15, textAlign: 'center', lineHeight: 22 },
-  startBtn: { marginTop: 20, backgroundColor: '#0A6E2E', paddingVertical: 12, paddingHorizontal: 24, borderRadius: 12 },
-  startBtnText: { color: '#fff', fontWeight: '700', fontSize: 14 },
-  flashOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: '#0E9F6E', opacity: 0.3, zIndex: 9999 },
-  bottom: { position: 'absolute', bottom: 0, left: 0, right: 0, padding: 16, paddingBottom: 20, borderTopWidth: 0.5, elevation: 10 },
+  emptyText: { fontSize: 13, color: '#888780' },
+  flashOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: '#0E9F6E', opacity: 0.2, zIndex: 9999 },
+  bottom: { position: 'absolute', bottom: 0, left: 0, right: 0, padding: 16, paddingBottom: 20, borderTopWidth: 0.5, borderColor: '#EAF3DE', backgroundColor: '#fff' },
   actionRow: { flexDirection: 'row', gap: 10 },
-  actionIconBtn: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 10, borderRadius: 12, borderWidth: 1, borderColor: '#EAF3DE', backgroundColor: '#fff' },
-  actionIconText: { fontSize: 11, fontWeight: '600', color: '#5B6560', marginTop: 2 },
+  actionIconBtn: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 8, borderRadius: 10, borderWidth: 1, borderColor: '#EAF3DE' },
+  actionIconText: { fontSize: 10, fontWeight: '600', color: '#5B6560' },
 });
