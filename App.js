@@ -1,14 +1,14 @@
-// App.js — Professional Business & Debt Management Suite
-import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+// App.js — Ultimate Professional Ledger: Folding Layout & Math Reconciliation
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
-  View, Text, FlatList, TextInput, TouchableOpacity,
-  StyleSheet, SafeAreaView, StatusBar, Alert, Platform, KeyboardAvoidingView, PermissionsAndroid,
-  AppRegistry, AppState, Vibration, BackHandler, NativeModules, SectionList
+  View, Text, TextInput, TouchableOpacity,
+  StyleSheet, StatusBar, Alert, Platform, PermissionsAndroid,
+  Vibration, BackHandler, NativeModules, SectionList, Animated
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Updates from 'expo-updates';
 
-import { useSmsListener, requestBackgroundReliability } from './src/hooks/useSmsListener';
+import { useSmsListener } from './src/hooks/useSmsListener';
 import { useTheme } from './src/hooks/useTheme';
 import PaymentCard from './src/components/PaymentCard';
 import ExpectingModal from './src/components/ExpectingModal';
@@ -32,7 +32,7 @@ const ACTIVE_KEY = '@fv_active_trip';
 const HISTORY_KEY = '@fv_history';
 
 function App() {
-  const { theme, themeName } = useTheme();
+  const { theme } = useTheme();
   const [trip, setTrip] = useState(null);
   const [isLoaded, setIsLoaded] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -47,14 +47,16 @@ function App() {
   const [toast, setToast] = useState({ visible: false, message: '' });
   const [activeTab, setActiveTab] = useState('IN');
 
-  // OTA Update Check
+  const scrollY = useRef(new Animated.Value(0)).current;
+
+  // Remote Updates logic
   useEffect(() => {
     async function onFetchUpdateAsync() {
       try {
         const update = await Updates.checkForUpdateAsync();
         if (update.isAvailable) {
-          Alert.alert('Update Available', 'A new version of Pesa List is available. Update now?',
-            [{ text: 'Later' }, { text: 'Update', onPress: async () => { await Updates.fetchUpdateAsync(); await Updates.reloadAsync(); }}]
+          Alert.alert('Update Available', 'Install the latest business patches?',
+            [{ text: 'Later' }, { text: 'Refresh', onPress: async () => { await Updates.fetchUpdateAsync(); await Updates.reloadAsync(); }}]
           );
         }
       } catch (e) {}
@@ -73,7 +75,7 @@ function App() {
   }, [activeTab]);
 
   const handleLiveSms = useCallback(async (message) => {
-    Vibration.vibrate(message.body.includes('Ksh 1,000') ? [0, 200, 100, 200] : [0, 100]);
+    Vibration.vibrate(message.body.includes('received') ? [0, 150, 50, 150] : [0, 80]);
     setFlashActive(true);
     setTimeout(() => setFlashActive(false), 800);
     setTrip(currentTrip => {
@@ -149,24 +151,10 @@ function App() {
   };
 
   const handleEndTrip = async () => {
-    if (!trip || (trip.payments.length === 0 && trip.expenses.length === 0)) { showToast('No data to save'); return; }
-    try {
-      const totals = getTripTotals(trip);
-      await analytics().logEvent('trip_ended', { total_ksh: totals.totalCollected, sent_ksh: totals.totalSent, passengers: trip.payments.length });
-    } catch(e) {}
-    Alert.alert("End Trip?", "Save current data to history.",
-      [{ text: "Cancel" }, { text: "End", onPress: async () => { setIsLoaded(false); await archiveTrip(trip); setTrip(createTrip()); setIsLoaded(true); showToast('Trip archived'); }}]
+    if (!trip || (trip.payments.length === 0 && trip.expenses.length === 0)) { showToast('No entries'); return; }
+    Alert.alert("Finalize Trip?", "Save this ledger to history.",
+      [{ text: "Cancel" }, { text: "End", onPress: async () => { setIsLoaded(false); await archiveTrip(trip); setTrip(createTrip()); setIsLoaded(true); showToast('Archived'); }}]
     );
-  };
-
-  const handleManualStart = async () => {
-    const hasData = (trip?.payments.length > 0 || trip?.expenses.length > 0);
-    if (hasData) {
-      Alert.alert("New Trip?", "Save current data first?",
-        [{ text: "Discard", style: 'destructive', onPress: () => setTrip(createTrip()) },
-         { text: "Save", onPress: async () => { await archiveTrip(trip); setTrip(createTrip()); }}]
-      );
-    } else { setTrip(createTrip()); }
   };
 
   const handleToggle = (id) => setTrip(t => toggleChecked(t, id));
@@ -182,29 +170,25 @@ function App() {
       onBack={() => setShowAdmin(false)}
       onSync={syncManual}
       onSyncHistorical={handleHistoricalSync}
-      onSimulate={() => handleLiveSms({ body: 'Confirmed. Received Ksh100 from TEST', originatingAddress: 'MPESA', timestamp: Date.now() })}
-      onReset={async () => { await AsyncStorage.multiRemove([ACTIVE_KEY, HISTORY_KEY]); setTrip(createTrip()); setHistory([]); setShowAdmin(false); Alert.alert('Reset Success', 'All data cleared.'); }}
+      onSimulate={() => handleLiveSms({ body: 'SIM Confirmed. Received Ksh100 from TEST. Transaction cost, Ksh5.00', originatingAddress: 'MPESA', timestamp: Date.now() })}
+      onReset={async () => { await AsyncStorage.multiRemove([ACTIVE_KEY, HISTORY_KEY]); setTrip(createTrip()); setHistory([]); setShowAdmin(false); Alert.alert('Wiped', 'Factory reset successful.'); }}
       onImport={async (data) => {
         if (data.activeTrip) await AsyncStorage.setItem(ACTIVE_KEY, serializeTrip(data.activeTrip));
         if (data.history) await AsyncStorage.setItem(HISTORY_KEY, JSON.stringify(data.history));
         setTrip(data.activeTrip || createTrip());
         setHistory(data.history || []);
         setShowAdmin(false);
-        Alert.alert('Import Success', 'Data restored.');
       }}
-      onUpdateFulizaLimit={(limit) => setTrip(t => ({ ...t, fulizaLimit: limit }))}
-      currentFulizaLimit={trip?.fulizaLimit || 0}
       theme={theme}
     />
   );
 
-  if (!isLoaded) return <View style={[styles.container, { backgroundColor: '#0B0F0D', justifyContent: 'center', alignItems: 'center' }]}><Text style={{ color: '#fff', fontSize: 16 }}>Readying Ledger...</Text></View>;
+  if (!isLoaded) return <View style={[styles.container, { backgroundColor: '#0B0F0D', justifyContent: 'center', alignItems: 'center' }]}><Text style={{ color: '#fff' }}>Syncing...</Text></View>;
 
   const searchResults = trip ? searchPayments(trip, searchQuery) : { payments: [], expected: [] };
   const allPayments = getAllPaymentsSorted(trip);
   const filteredPayments = (searchQuery ? searchResults.payments : allPayments).filter(p => activeTab === 'IN' ? p.type === 'RECEIVED' : p.type === 'SENT');
 
-  // Group by Date for Neatness
   const sections = [];
   const groups = filteredPayments.reduce((acc, p) => {
     const d = new Date(p.receivedAt).toLocaleDateString('en-KE', { day: 'numeric', month: 'short' });
@@ -218,38 +202,45 @@ function App() {
   const topEarnerId = trip?.payments.filter(p => p.type === 'RECEIVED').sort((a,b) => b.amount - a.amount)[0]?.id;
 
   return (
-    <View style={[styles.container, { backgroundColor: '#F6F8F7' }]}>
+    <View style={styles.container}>
       <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
-      <LedgerHeader
-        totals={{ ...totals, startedAt: trip?.startedAt }}
-        onShowHistory={() => setShowHistory(true)}
-        onManualStart={handleManualStart}
-        onShowAdmin={() => setShowAdmin(true)}
-        isPrivacyMode={isPrivacyMode}
-        onTogglePrivacy={() => setIsPrivacyMode(!isPrivacyMode)}
-      />
-      {flashActive && <View style={styles.flashOverlay} />}
 
-      <View style={styles.viewContainer}>
-        <View style={styles.searchBar}>
-          <Text>🔍</Text>
-          <TextInput style={styles.searchInput} placeholder="Search ledger..." value={searchQuery} onChangeText={setSearchQuery} autoCapitalize="characters" />
-        </View>
-        <View style={styles.segmentedTab}>
-          <TouchableOpacity onPress={() => setActiveTab('IN')} style={[styles.tab, activeTab === 'IN' && styles.tabActiveIn]}><Text style={[styles.tabText, activeTab === 'IN' && styles.tabTextActiveIn]}>IN</Text></TouchableOpacity>
-          <TouchableOpacity onPress={() => setActiveTab('OUT')} style={[styles.tab, activeTab === 'OUT' && styles.tabActiveOut]}><Text style={[styles.tabText, activeTab === 'OUT' && styles.tabTextActiveOut]}>OUT</Text></TouchableOpacity>
-        </View>
-      </View>
-
-      <SectionList
+      {/* Scrollable Area */}
+      <Animated.SectionList
         sections={sections}
         keyExtractor={item => item.id}
         renderItem={({ item }) => <PaymentCard payment={item} onToggle={handleToggle} isBlurred={isPrivacyMode} isTopEarner={item.id === topEarnerId} theme={theme} />}
         renderSectionHeader={({ section: { title } }) => <Text style={styles.sectionLabel}>{title}</Text>}
-        ListEmptyComponent={<View style={styles.empty}><Text style={styles.emptyText}>{searchQuery ? 'No matches' : 'No entries yet.'}</Text></View>}
-        contentContainerStyle={{ paddingBottom: 160 }}
+        ListEmptyComponent={<View style={styles.empty}><Text style={styles.emptyText}>{searchQuery ? 'No results' : 'Waiting for M-Pesa...'}</Text></View>}
+        contentContainerStyle={{ paddingTop: 330, paddingBottom: 160 }}
         stickySectionHeadersEnabled={false}
+        onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], { useNativeDriver: false })}
+        scrollEventThrottle={16}
       />
+
+      {/* Folding Floating Header */}
+      <LedgerHeader
+        totals={{ ...totals, startedAt: trip?.startedAt }}
+        onShowHistory={() => setShowHistory(true)}
+        onManualStart={() => setTrip(createTrip())}
+        onShowAdmin={() => setShowAdmin(true)}
+        isPrivacyMode={isPrivacyMode}
+        onTogglePrivacy={() => setIsPrivacyMode(!isPrivacyMode)}
+        scrollY={scrollY}
+      >
+        <View style={styles.headerFloating}>
+           <View style={styles.searchBar}>
+              <Text>🔍</Text>
+              <TextInput style={styles.searchInput} placeholder="Search names, phones..." value={searchQuery} onChangeText={setSearchQuery} autoCapitalize="characters" />
+           </View>
+           <View style={styles.segmentedTab}>
+              <TouchableOpacity onPress={() => setActiveTab('IN')} style={[styles.tab, activeTab === 'IN' && styles.tabActiveIn]}><Text style={[styles.tabText, activeTab === 'IN' && styles.tabTextActiveIn]}>INCOME</Text></TouchableOpacity>
+              <TouchableOpacity onPress={() => setActiveTab('OUT')} style={[styles.tab, activeTab === 'OUT' && styles.tabActiveOut]}><Text style={[styles.tabText, activeTab === 'OUT' && styles.tabTextActiveOut]}>SPENDING</Text></TouchableOpacity>
+           </View>
+        </View>
+      </LedgerHeader>
+
+      {flashActive && <View style={styles.flashOverlay} />}
 
       <View style={styles.bottom}>
         <View style={styles.actionRow}>
@@ -266,18 +257,16 @@ function App() {
   );
 }
 
-export default function AppWrapper() { return <ErrorBoundary><App /></ErrorBoundary>; }
-
 const styles = StyleSheet.create({
-  container: { flex: 1 },
-  viewContainer: { paddingHorizontal: 16, marginTop: -14, zIndex: 10 },
+  container: { flex: 1, backgroundColor: '#F6F8F7' },
+  headerFloating: { paddingHorizontal: 0 },
   searchBar: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 10, borderRadius: 12, borderWidth: 0.5, borderColor: '#D3D1C7', backgroundColor: '#fff', elevation: 4 },
   searchInput: { flex: 1, fontSize: 13, paddingHorizontal: 8 },
-  segmentedTab: { flexDirection: 'row', marginTop: 12, backgroundColor: '#fff', borderRadius: 10, padding: 2, borderWidth: 1, borderColor: '#EAF3DE' },
+  segmentedTab: { flexDirection: 'row', marginTop: 10, backgroundColor: 'rgba(0,0,0,0.1)', borderRadius: 10, padding: 2 },
   tab: { flex: 1, alignItems: 'center', paddingVertical: 8, borderRadius: 8 },
-  tabActiveIn: { backgroundColor: '#F0F9EB' },
-  tabActiveOut: { backgroundColor: '#FEF2F2' },
-  tabText: { fontSize: 9, fontWeight: '900', color: '#888780', letterSpacing: 1 },
+  tabActiveIn: { backgroundColor: '#fff' },
+  tabActiveOut: { backgroundColor: '#fff' },
+  tabText: { fontSize: 8, fontWeight: '900', color: '#fff', letterSpacing: 1 },
   tabTextActiveIn: { color: '#0A6E2E' },
   tabTextActiveOut: { color: '#DC2626' },
   sectionLabel: { color: '#5F5E5A', fontSize: 10, fontWeight: '800', paddingHorizontal: 20, marginTop: 15, marginBottom: 4, letterSpacing: 1 },
@@ -289,3 +278,5 @@ const styles = StyleSheet.create({
   actionIconBtn: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 8, borderRadius: 10, borderWidth: 1, borderColor: '#EAF3DE' },
   actionIconText: { fontSize: 10, fontWeight: '600', color: '#5B6560' },
 });
+
+export default function AppWrapper() { return <ErrorBoundary><App /></ErrorBoundary>; }

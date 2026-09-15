@@ -1,4 +1,4 @@
-// AdminScreen.js — System monitoring and data management
+// AdminScreen.js — Professional Business Monitoring
 import React, { useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView,
@@ -9,14 +9,13 @@ import { getLifetimeStats } from '../logic/tripManager';
 import analytics from '@react-native-firebase/analytics';
 
 export default function AdminScreen({
-  history, smsLog, onBack, onReset, onImport, onSync, onSyncHistorical, onSimulate, onUpdateFulizaLimit, currentFulizaLimit, theme
+  history, smsLog, onBack, onReset, onImport, onSync, onSyncHistorical, onSimulate, theme
 }) {
   const stats = getLifetimeStats(history);
   const [importJson, setImportJson] = useState('');
   const [showImport, setShowImport] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [scanDays, setScanDays] = useState('7');
-  const [fulizaInput, setFulizaInput] = useState(currentFulizaLimit.toString());
 
   const handleSync = async () => {
     setIsSyncing(true);
@@ -45,28 +44,21 @@ export default function AdminScreen({
     }
   };
 
-  const handleUpdateLimit = () => {
-    const limit = parseFloat(fulizaInput);
-    if (isNaN(limit)) { Alert.alert('Error', 'Please enter a valid number.'); return; }
-    onUpdateFulizaLimit(limit);
-    Alert.alert('Settings Saved', `Fuliza borrowing limit set to Ksh ${limit.toLocaleString()}.`);
-  };
-
   const handleShareApp = async () => {
     try {
-      await Share.share({ message: 'Hey! I use Pesa List to track my M-Pesa business automatically. Download it to manage your money better!', url: 'https://pesalist.app' });
+      await Share.share({ message: 'Hey! I use Pesa List to track my M-Pesa business ledger automatically. Download it to manage your money better!', url: 'https://pesalist.app' });
       await analytics().logEvent('share_app', { method: 'admin_panel' });
     } catch (e) {}
   };
 
   const handleExportCSV = async () => {
     try {
-      let csv = 'Date,Time,Type,Sender,Phone,Amount,Status,AccountRef\n';
+      let csv = 'Date,Time,Type,Sender,Phone,Amount,Fee,Status\n';
       history.forEach(trip => {
         trip.payments.forEach(p => {
           const date = new Date(p.receivedAt).toLocaleDateString();
           const time = new Date(p.receivedAt).toLocaleTimeString();
-          csv += `"${date}","${time}","${p.type || 'RECEIVED'}","${p.senderName}","${p.senderPhone || ''}",${p.amount},"${p.checked ? 'Verified' : 'Pending'}","${p.accountRef || ''}"\n`;
+          csv += `"${date}","${time}","${p.type}","${p.senderName}","${p.senderPhone || ''}",${p.amount},${p.txCost},"${p.checked ? 'Verified' : 'Pending'}"\n`;
         });
       });
       await Share.share({ message: csv, title: 'Pesa List Export' });
@@ -77,60 +69,44 @@ export default function AdminScreen({
     <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.container}>
       <View style={[styles.header, { backgroundColor: '#0A6E2E' }]}>
         <TouchableOpacity onPress={onBack} style={styles.backBtn}><Text style={{ color: '#fff', fontSize: 24 }}>←</Text></TouchableOpacity>
-        <Text style={styles.title}>Accounting Admin</Text>
+        <Text style={styles.title}>Business Dashboard</Text>
       </View>
 
       <ScrollView contentContainerStyle={styles.scroll}>
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>BUSINESS SETTINGS</Text>
-          <View style={styles.syncBox}>
-             <Text style={styles.syncLabel}>Set your Fuliza Borrowing Limit:</Text>
-             <View style={styles.row}>
-                <TextInput
-                  style={styles.daysInput}
-                  keyboardType="number-pad"
-                  value={fulizaInput}
-                  onChangeText={setFulizaInput}
-                  placeholder="e.g. 1000"
-                />
-                <TouchableOpacity onPress={handleUpdateLimit} style={styles.scanBtn}>
-                   <Text style={styles.scanBtnText}>Save Limit</Text>
-                </TouchableOpacity>
-             </View>
-             <Text style={styles.hint}>Used to cap the "Net Financial Position" display correctly.</Text>
-          </View>
-        </View>
-
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>LIFETIME PERFORMANCE</Text>
+          <Text style={styles.sectionTitle}>LIFETIME METRICS</Text>
           <View style={styles.statsGrid}>
             <View style={styles.statBox}>
-              <Text style={styles.statLabel}>Total Received</Text>
+              <Text style={styles.statLabel}>Total Income</Text>
               <Text style={styles.statVal}>Ksh {stats.totalCollected.toLocaleString()}</Text>
             </View>
             <View style={styles.statBox}>
-              <Text style={styles.statLabel}>Total Sent</Text>
+              <Text style={styles.statLabel}>Total Spent</Text>
               <Text style={[styles.statVal, { color: '#DC2626' }]}>Ksh {stats.totalSent?.toLocaleString() || 0}</Text>
             </View>
-            <View style={[styles.statBox, { minWidth: '45%' }]}>
-              <Text style={styles.statLabel}>Total Trips</Text>
-              <Text style={styles.statVal}>{stats.totalTrips}</Text>
+            <View style={[styles.statBox, { borderColor: '#FFB2B2' }]}>
+              <Text style={[styles.statLabel, { color: '#DC2626' }]}>Total Fees</Text>
+              <Text style={[styles.statVal, { color: '#DC2626' }]}>Ksh {stats.totalFees?.toLocaleString() || 0}</Text>
             </View>
-            <View style={[styles.statBox, { minWidth: '45%', borderColor: '#FBBF24' }]}>
-              <Text style={[styles.statLabel, { color: '#FBBF24' }]}>BETTING WASTE</Text>
+            <View style={[styles.statBox, { borderColor: '#FBBF24' }]}>
+              <Text style={[styles.statLabel, { color: '#FBBF24' }]}>Betting Waste</Text>
               <Text style={[styles.statVal, { color: '#F59E0B' }]}>Ksh {stats.totalGamblingWasted?.toLocaleString() || 0}</Text>
+            </View>
+            <View style={[styles.statBox, { borderColor: '#60A5FA' }]}>
+              <Text style={[styles.statLabel, { color: '#60A5FA' }]}>Airtime Spent</Text>
+              <Text style={[styles.statVal, { color: '#3B82F6' }]}>Ksh {stats.totalUtilitySpent?.toLocaleString() || 0}</Text>
             </View>
           </View>
         </View>
 
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>HISTORICAL SCANNING</Text>
+          <Text style={styles.sectionTitle}>HISTORICAL ACCOUNTING</Text>
           <View style={styles.syncBox}>
             <Text style={styles.syncLabel}>Scan inbox for last X days:</Text>
             <View style={styles.row}>
               <TextInput style={styles.daysInput} keyboardType="number-pad" value={scanDays} onChangeText={setScanDays} />
               <TouchableOpacity onPress={handleHistoricalScan} disabled={isSyncing} style={[styles.scanBtn, isSyncing && { opacity: 0.5 }]}>
-                <Text style={styles.scanBtnText}>{isSyncing ? 'Scanning...' : 'Start Scan'}</Text>
+                <Text style={styles.scanBtnText}>{isSyncing ? 'Scanning...' : 'Deep Scan'}</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -161,15 +137,14 @@ const styles = StyleSheet.create({
   sectionTitle: { fontSize: 10, fontWeight: '800', color: '#888780', letterSpacing: 1, marginBottom: 12 },
   statsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
   statBox: { flex: 1, minWidth: '45%', backgroundColor: '#fff', padding: 16, borderRadius: 16, borderWidth: 1, borderColor: '#EAF3DE' },
-  statLabel: { fontSize: 11, color: '#888780', marginBottom: 4 },
-  statVal: { fontSize: 16, fontWeight: '700', color: '#0A6E2E' },
+  statLabel: { fontSize: 10, color: '#888780', marginBottom: 4, fontWeight: '800' },
+  statVal: { fontSize: 15, fontWeight: '700', color: '#0A6E2E' },
   syncBox: { backgroundColor: '#fff', padding: 16, borderRadius: 16, borderWidth: 1, borderColor: '#EAF3DE' },
   syncLabel: { fontSize: 12, color: '#2C2C2A', fontWeight: '700', marginBottom: 10 },
   row: { flexDirection: 'row', gap: 10 },
   daysInput: { flex: 1, borderWidth: 1, borderColor: '#D3D1C7', borderRadius: 10, paddingHorizontal: 12, fontSize: 16, height: 45 },
   scanBtn: { flex: 1.5, backgroundColor: '#0A6E2E', borderRadius: 10, justifyContent: 'center', alignItems: 'center' },
   scanBtnText: { color: '#fff', fontWeight: '700', fontSize: 13 },
-  hint: { fontSize: 9, color: '#888780', marginTop: 10, fontStyle: 'italic' },
   btnRow: { flexDirection: 'row', gap: 12 },
   actionBtn: { flex: 1, backgroundColor: '#EAF3DE', padding: 14, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   resetBtn: { padding: 16, marginTop: 20, borderRadius: 12, borderWidth: 1, borderColor: '#FCE4E4', alignItems: 'center' },
