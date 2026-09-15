@@ -40,8 +40,8 @@ export default function LedgerHeader({
   });
 
   const headerTranslateY = scrollY.interpolate({
-    inputRange: [0, 200],
-    outputRange: [0, -220],
+    inputRange: [0, 180],
+    outputRange: [0, -260], // More aggressive fold to clear the list
     extrapolate: 'clamp'
   });
 
@@ -155,7 +155,7 @@ const styles = StyleSheet.create({
     borderBottomLeftRadius: 32,
     borderBottomRightRadius: 32,
     paddingTop: StatusBar.currentHeight + 10,
-    paddingBottom: 15,
+    paddingBottom: 20,
     elevation: 25,
     zIndex: 100,
     position: 'absolute',

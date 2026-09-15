@@ -3,28 +3,30 @@
     "name": "PESA LIST",
     "slug": "pesa-list",
     "version": "1.0.0",
+    "runtimeVersion": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
     "assetBundlePatterns": [
       "**/*"
     ],
+    "updates": {
+      "url": "https://u.expo.dev/39ad0bb7-6304-438e-9586-aac8664c0a86",
+      "enabled": true,
+      "checkAutomatically": "ON_LOAD",
+      "fallbackToCacheTimeout": 0
+    },
     "android": {
       "package": "com.pesalist.app",
       "permissions": [
         "RECEIVE_SMS",
         "READ_SMS",
-        "READ_PHONE_STATE",
-        "RECEIVE_SMS",
-        "READ_SMS",
         "READ_PHONE_STATE"
       ],
-      "blockedPermissions": [],
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#0A6E2E"
-      },
-      "runtimeVersion": "1.0.0"
+      }
     },
     "plugins": [
       [
@@ -43,14 +45,6 @@
     "extra": {
       "eas": {
         "projectId": "39ad0bb7-6304-438e-9586-aac8664c0a86"
-      }
-    },
-    "updates": {
-      "url": "https://u.expo.dev/39ad0bb7-6304-438e-9586-aac8664c0a86"
-    },
-    "ios": {
-      "runtimeVersion": {
-        "policy": "appVersion"
       }
     },
     "owner": "21sicko"

@@ -15,7 +15,7 @@ export default function AdminScreen({
   const [importJson, setImportJson] = useState('');
   const [showImport, setShowImport] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
-  const [scanDays, setScanDays] = useState('7');
+  const [scanDays, setScanDays] = useState('30');
 
   const handleSync = async () => {
     setIsSyncing(true);
@@ -27,8 +27,8 @@ export default function AdminScreen({
   const handleHistoricalScan = async () => {
     const { SmsBridge } = NativeModules;
     if (!SmsBridge) return;
-    const days = parseInt(scanDays) || 7;
-    if (days > 180) { Alert.alert('Limit Exceeded', 'Maximum range is 180 days.'); return; }
+    const days = parseInt(scanDays) || 30;
+    if (days > 366) { Alert.alert('Limit Exceeded', 'Maximum range is 366 days.'); return; }
     setIsSyncing(true);
     try {
       const now = Date.now();
@@ -96,19 +96,24 @@ export default function AdminScreen({
               <Text style={[styles.statLabel, { color: '#60A5FA' }]}>Airtime Spent</Text>
               <Text style={[styles.statVal, { color: '#3B82F6' }]}>Ksh {stats.totalUtilitySpent?.toLocaleString() || 0}</Text>
             </View>
+            <View style={[styles.statBox, { borderColor: '#C084FC' }]}>
+              <Text style={[styles.statLabel, { color: '#A855F7' }]}>Phone Loans</Text>
+              <Text style={[styles.statVal, { color: '#9333EA' }]}>Ksh {stats.totalPhoneLoanSpent?.toLocaleString() || 0}</Text>
+            </View>
           </View>
         </View>
 
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>HISTORICAL ACCOUNTING</Text>
+          <Text style={styles.sectionTitle}>1-YEAR HISTORICAL SCAN</Text>
           <View style={styles.syncBox}>
             <Text style={styles.syncLabel}>Scan inbox for last X days:</Text>
             <View style={styles.row}>
               <TextInput style={styles.daysInput} keyboardType="number-pad" value={scanDays} onChangeText={setScanDays} />
               <TouchableOpacity onPress={handleHistoricalScan} disabled={isSyncing} style={[styles.scanBtn, isSyncing && { opacity: 0.5 }]}>
-                <Text style={styles.scanBtnText}>{isSyncing ? 'Scanning...' : 'Deep Scan'}</Text>
+                <Text style={styles.scanBtnText}>{isSyncing ? 'Scanning...' : 'Start Scan'}</Text>
               </TouchableOpacity>
             </View>
+            <Text style={styles.hint}>Full 366-day recovery supported.</Text>
           </View>
         </View>
 
@@ -145,6 +150,7 @@ const styles = StyleSheet.create({
   daysInput: { flex: 1, borderWidth: 1, borderColor: '#D3D1C7', borderRadius: 10, paddingHorizontal: 12, fontSize: 16, height: 45 },
   scanBtn: { flex: 1.5, backgroundColor: '#0A6E2E', borderRadius: 10, justifyContent: 'center', alignItems: 'center' },
   scanBtnText: { color: '#fff', fontWeight: '700', fontSize: 13 },
+  hint: { fontSize: 9, color: '#888780', marginTop: 10, fontStyle: 'italic' },
   btnRow: { flexDirection: 'row', gap: 12 },
   actionBtn: { flex: 1, backgroundColor: '#EAF3DE', padding: 14, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   resetBtn: { padding: 16, marginTop: 20, borderRadius: 12, borderWidth: 1, borderColor: '#FCE4E4', alignItems: 'center' },

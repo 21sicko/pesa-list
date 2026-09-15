@@ -1,9 +1,9 @@
-// App.js — Ultimate Professional Ledger: Folding Layout & Math Reconciliation
+// App.js — Elite Business Suite: Collapsible Header & Full Reconciliation
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity,
   StyleSheet, StatusBar, Alert, Platform, PermissionsAndroid,
-  Vibration, BackHandler, NativeModules, SectionList, Animated
+  Vibration, BackHandler, SectionList, Animated
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Updates from 'expo-updates';
@@ -49,14 +49,14 @@ function App() {
 
   const scrollY = useRef(new Animated.Value(0)).current;
 
-  // Remote Updates logic
+  // Remote Updates
   useEffect(() => {
     async function onFetchUpdateAsync() {
       try {
         const update = await Updates.checkForUpdateAsync();
         if (update.isAvailable) {
-          Alert.alert('Update Available', 'Install the latest business patches?',
-            [{ text: 'Later' }, { text: 'Refresh', onPress: async () => { await Updates.fetchUpdateAsync(); await Updates.reloadAsync(); }}]
+          Alert.alert('Update Available', 'Upgrade Pesa List now?',
+            [{ text: 'Later' }, { text: 'Update', onPress: async () => { await Updates.fetchUpdateAsync(); await Updates.reloadAsync(); }}]
           );
         }
       } catch (e) {}
@@ -75,7 +75,7 @@ function App() {
   }, [activeTab]);
 
   const handleLiveSms = useCallback(async (message) => {
-    Vibration.vibrate(message.body.includes('received') ? [0, 150, 50, 150] : [0, 80]);
+    Vibration.vibrate(message.body.includes('Ksh 1,000') ? [0, 200, 100, 200] : [0, 100]);
     setFlashActive(true);
     setTimeout(() => setFlashActive(false), 800);
     setTrip(currentTrip => {
@@ -171,7 +171,7 @@ function App() {
       onSync={syncManual}
       onSyncHistorical={handleHistoricalSync}
       onSimulate={() => handleLiveSms({ body: 'SIM Confirmed. Received Ksh100 from TEST. Transaction cost, Ksh5.00', originatingAddress: 'MPESA', timestamp: Date.now() })}
-      onReset={async () => { await AsyncStorage.multiRemove([ACTIVE_KEY, HISTORY_KEY]); setTrip(createTrip()); setHistory([]); setShowAdmin(false); Alert.alert('Wiped', 'Factory reset successful.'); }}
+      onReset={async () => { await AsyncStorage.multiRemove([ACTIVE_KEY, HISTORY_KEY]); setTrip(createTrip()); setHistory([]); setShowAdmin(false); Alert.alert('Wiped', 'Data cleared.'); }}
       onImport={async (data) => {
         if (data.activeTrip) await AsyncStorage.setItem(ACTIVE_KEY, serializeTrip(data.activeTrip));
         if (data.history) await AsyncStorage.setItem(HISTORY_KEY, JSON.stringify(data.history));
@@ -183,7 +183,7 @@ function App() {
     />
   );
 
-  if (!isLoaded) return <View style={[styles.container, { backgroundColor: '#0B0F0D', justifyContent: 'center', alignItems: 'center' }]}><Text style={{ color: '#fff' }}>Syncing...</Text></View>;
+  if (!isLoaded) return <View style={[styles.container, { backgroundColor: '#0B0F0D', justifyContent: 'center', alignItems: 'center' }]}><Text style={{ color: '#fff' }}>Loading...</Text></View>;
 
   const searchResults = trip ? searchPayments(trip, searchQuery) : { payments: [], expected: [] };
   const allPayments = getAllPaymentsSorted(trip);
@@ -205,20 +205,18 @@ function App() {
     <View style={styles.container}>
       <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
 
-      {/* Scrollable Area */}
       <Animated.SectionList
         sections={sections}
         keyExtractor={item => item.id}
         renderItem={({ item }) => <PaymentCard payment={item} onToggle={handleToggle} isBlurred={isPrivacyMode} isTopEarner={item.id === topEarnerId} theme={theme} />}
         renderSectionHeader={({ section: { title } }) => <Text style={styles.sectionLabel}>{title}</Text>}
         ListEmptyComponent={<View style={styles.empty}><Text style={styles.emptyText}>{searchQuery ? 'No results' : 'Waiting for M-Pesa...'}</Text></View>}
-        contentContainerStyle={{ paddingTop: 330, paddingBottom: 160 }}
+        contentContainerStyle={{ paddingTop: 380, paddingBottom: 160 }}
         stickySectionHeadersEnabled={false}
         onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], { useNativeDriver: false })}
         scrollEventThrottle={16}
       />
 
-      {/* Folding Floating Header */}
       <LedgerHeader
         totals={{ ...totals, startedAt: trip?.startedAt }}
         onShowHistory={() => setShowHistory(true)}
@@ -228,10 +226,11 @@ function App() {
         onTogglePrivacy={() => setIsPrivacyMode(!isPrivacyMode)}
         scrollY={scrollY}
       >
+        {/* Floating Search Bar & Filter Tabs */}
         <View style={styles.headerFloating}>
            <View style={styles.searchBar}>
               <Text>🔍</Text>
-              <TextInput style={styles.searchInput} placeholder="Search names, phones..." value={searchQuery} onChangeText={setSearchQuery} autoCapitalize="characters" />
+              <TextInput style={styles.searchInput} placeholder="Search ledger..." value={searchQuery} onChangeText={setSearchQuery} autoCapitalize="characters" />
            </View>
            <View style={styles.segmentedTab}>
               <TouchableOpacity onPress={() => setActiveTab('IN')} style={[styles.tab, activeTab === 'IN' && styles.tabActiveIn]}><Text style={[styles.tabText, activeTab === 'IN' && styles.tabTextActiveIn]}>INCOME</Text></TouchableOpacity>
