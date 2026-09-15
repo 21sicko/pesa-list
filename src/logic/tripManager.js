@@ -1,4 +1,4 @@
-// tripManager.js — Ultimate Accounting Logic: Multi-Debt, Fees, Utilities & Reversals
+// tripManager.js — Ultimate Accounting Logic: Multi-Debt, Phone Loans, Fees & Utilities
 const { parseMpesasms } = require('./smsMatcher');
 
 const AUTO_END_MINUTES = 30;
@@ -59,6 +59,7 @@ function addPayment(trip, smsText, senderId, overrideTimestamp = null) {
     mshwariDebt: parsed.mshwariDebt || 0,
     isGambling: parsed.isGambling || false,
     isUtility: parsed.isUtility || false,
+    isPhoneLoan: parsed.isPhoneLoan || false, // New: Phone Lending Tracking
     checked: false,
     matchedFromExpected: false,
     receivedAt: overrideTimestamp ? (new Date(overrideTimestamp).toISOString()) : new Date().toISOString(),
@@ -71,7 +72,7 @@ function addPayment(trip, smsText, senderId, overrideTimestamp = null) {
     payments: [...(trip.payments || []), newPayment]
   };
 
-  if (newPayment.type === 'RECEIVED' && !newPayment.isGambling) {
+  if (newPayment.type === 'RECEIVED' && !newPayment.isGambling && !newPayment.isPhoneLoan) {
     const matchResult = tryMatchExpected(updatedTrip, parsed.senderName, parsed.amount);
     if (matchResult.matched) {
       updatedTrip.payments[updatedTrip.payments.length - 1].matchedFromExpected = true;
@@ -133,7 +134,7 @@ function searchPayments(trip, query) {
 }
 
 function getTripTotals(trip) {
-  if (!trip || !trip.payments) return { totalCollected: 0, totalSent: 0, totalChecked: 0, checkedCount: 0, pendingCount: 0, totalPayments: 0, unmatchedExpected: 0, totalExpenses: 0, netProfit: 0, currentFulizaDebt: 0, latestMpesaBalance: 0, gamblingWasted: 0, utilitySpent: 0, totalFees: 0, reconciledBalance: 0, kcbLoan: 0, mshwariLoan: 0, totalLoanDebt: 0, totalReversed: 0 };
+  if (!trip || !trip.payments) return { totalCollected: 0, totalSent: 0, totalChecked: 0, checkedCount: 0, pendingCount: 0, totalPayments: 0, unmatchedExpected: 0, totalExpenses: 0, netProfit: 0, currentFulizaDebt: 0, latestMpesaBalance: 0, gamblingWasted: 0, utilitySpent: 0, phoneLoanSpent: 0, totalFees: 0, reconciledBalance: 0, kcbLoan: 0, mshwariLoan: 0, totalLoanDebt: 0, totalReversed: 0 };
 
   const received = trip.payments.filter(p => p.type === 'RECEIVED');
   const sent = trip.payments.filter(p => p.type === 'SENT');
@@ -147,7 +148,7 @@ function getTripTotals(trip) {
   const checkedCount = received.filter(p => p.checked).length;
   const totalExpenses = (trip.expenses || []).reduce((sum, e) => sum + (e.amount || 0), 0);
 
-  // Debts
+  // Latest Debt status per provider
   const currentFulizaDebt = [...trip.payments].reverse().find(p => p.fulizaDebt > 0)?.fulizaDebt || 0;
   const kcbLoan = [...trip.payments].reverse().find(p => p.kcbDebt > 0)?.kcbDebt || 0;
   const mshwariLoan = [...trip.payments].reverse().find(p => p.mshwariDebt > 0)?.mshwariDebt || 0;
@@ -155,19 +156,18 @@ function getTripTotals(trip) {
 
   const latestMpesaBalance = [...trip.payments].reverse().find(p => p.postBalance !== null && p.postBalance !== undefined)?.postBalance || 0;
 
-  // Gambling tracking: Deposits - Withdrawals
+  // Trackers
   const gamblingSent = sent.filter(p => p.isGambling).reduce((sum, p) => sum + (p.amount || 0), 0);
   const gamblingReceived = received.filter(p => p.isGambling).reduce((sum, p) => sum + (p.amount || 0), 0);
-  const gamblingWasted = Math.max(0, (gamblingSent + totalFees) - gamblingReceived); // Including fees in gambling waste
+  const gamblingWasted = Math.max(0, gamblingSent - gamblingReceived);
 
-  // Utility tracking (Airtime/Bundles)
   const utilitySpent = sent.filter(p => p.isUtility).reduce((sum, p) => sum + (p.amount || 0), 0);
+  const phoneLoanSpent = sent.filter(p => p.isPhoneLoan).reduce((sum, p) => sum + (p.amount || 0), 0);
 
-  // Net Position (Cash minus all loans)
+  // Financial Position: Cash - (All Loans)
   let reconciledBalance = latestMpesaBalance - totalLoanDebt;
 
-  // Math Reconciliation Formula:
-  // Net Profit = (Money In) - (Money Out) - (Expenses) - (Transaction Fees) + (Reversals)
+  // Final Reconciliation
   const netProfit = totalCollected - totalSent - totalExpenses - totalFees + totalReversed;
 
   return {
@@ -188,7 +188,8 @@ function getTripTotals(trip) {
     latestMpesaBalance: Math.round(latestMpesaBalance * 100) / 100,
     reconciledBalance: Math.round(reconciledBalance * 100) / 100,
     gamblingWasted: Math.round(gamblingWasted * 100) / 100,
-    utilitySpent: Math.round(utilitySpent * 100) / 100
+    utilitySpent: Math.round(utilitySpent * 100) / 100,
+    phoneLoanSpent: Math.round(phoneLoanSpent * 100) / 100
   };
 }
 
@@ -207,7 +208,7 @@ function getAllPaymentsSorted(trip) {
 }
 
 function getLifetimeStats(history) {
-  if (!history || history.length === 0) return { totalCollected: 0, totalSent: 0, totalTrips: 0, totalPassengers: 0, totalGamblingWasted: 0, totalUtilitySpent: 0, totalFees: 0, totalReversed: 0 };
+  if (!history || history.length === 0) return { totalCollected: 0, totalSent: 0, totalTrips: 0, totalPassengers: 0, totalGamblingWasted: 0, totalUtilitySpent: 0, totalFees: 0, totalPhoneLoanSpent: 0 };
   return history.reduce((acc, trip) => {
     const totals = getTripTotals(trip);
     return {
@@ -218,9 +219,9 @@ function getLifetimeStats(history) {
       totalGamblingWasted: (acc.totalGamblingWasted || 0) + totals.gamblingWasted,
       totalUtilitySpent: (acc.totalUtilitySpent || 0) + totals.utilitySpent,
       totalFees: (acc.totalFees || 0) + totals.totalFees,
-      totalReversed: (acc.totalReversed || 0) + totals.totalReversed
+      totalPhoneLoanSpent: (acc.totalPhoneLoanSpent || 0) + totals.phoneLoanSpent
     };
-  }, { totalCollected: 0, totalSent: 0, totalTrips: 0, totalPassengers: 0, totalGamblingWasted: 0, totalUtilitySpent: 0, totalFees: 0, totalReversed: 0 });
+  }, { totalCollected: 0, totalSent: 0, totalTrips: 0, totalPassengers: 0, totalGamblingWasted: 0, totalUtilitySpent: 0, totalFees: 0, totalPhoneLoanSpent: 0 });
 }
 
 function formatTripForHistory(trip) {
@@ -234,13 +235,12 @@ function exportTripAsText(trip) {
   const totals = getTripTotals(trip);
   const date = new Date(trip.startedAt).toLocaleDateString('en-KE');
   const time = new Date(trip.startedAt).toLocaleTimeString('en-KE', { hour: '2-digit', minute: '2-digit' });
-  let text = `*Pesa List - Record*\nDate: ${date} at ${time}\nStatus: ${trip.status.toUpperCase()}\nTotal Received: Ksh ${totals.totalCollected.toLocaleString()}\nTotal Outflow: Ksh ${(totals.totalSent + totals.totalFees).toLocaleString()}\nTransaction Fees: Ksh ${totals.totalFees.toLocaleString()}\nNet Profit: Ksh ${totals.netProfit.toLocaleString()}\nM-Pesa Balance: Ksh ${totals.latestMpesaBalance.toLocaleString()}\nTotal Debt: Ksh ${totals.totalLoanDebt.toLocaleString()}\nGambling Waste: Ksh ${totals.gamblingWasted.toLocaleString()}\nAirtime: Ksh ${totals.utilitySpent.toLocaleString()}\n---\n`;
+  let text = `*Pesa List - Record*\nDate: ${date} at ${time}\nStatus: ${trip.status.toUpperCase()}\nTotal Received: Ksh ${totals.totalCollected.toLocaleString()}\nTotal Sent: Ksh ${totals.totalSent.toLocaleString()}\nNet Profit: Ksh ${totals.netProfit.toLocaleString()}\nM-Pesa Balance: Ksh ${totals.latestMpesaBalance.toLocaleString()}\nTotal Loan Debt: Ksh ${totals.totalLoanDebt.toLocaleString()}\nPhone Loan Payments: Ksh ${totals.phoneLoanSpent.toLocaleString()}\nGambling Waste: Ksh ${totals.gamblingWasted.toLocaleString()}\n---\n`;
   if (trip.payments.length === 0) text += 'No entries.\n';
   else trip.payments.forEach((p, i) => {
     const status = p.checked ? '✅' : '⏳';
     const typeSign = p.type === 'SENT' ? '-' : '+';
-    const payDate = new Date(p.receivedAt).toLocaleDateString('en-KE', { day: 'numeric', month: 'short' });
-    text += `${i + 1}. ${status} [${p.type}] ${payDate}: ${p.senderName} - ${typeSign}Ksh ${p.amount?.toLocaleString() || 0} (Fee: ${p.txCost})\n`;
+    text += `${i + 1}. ${status} [${p.type}] ${p.senderName} - ${typeSign}Ksh ${p.amount?.toLocaleString() || 0}\n`;
   });
   return text;
 }

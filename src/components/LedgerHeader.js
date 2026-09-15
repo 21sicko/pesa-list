@@ -21,6 +21,7 @@ export default function LedgerHeader({
     reconciledBalance = 0,
     gamblingWasted = 0,
     utilitySpent = 0,
+    phoneLoanSpent = 0,
     totalFees = 0
   } = totals;
 
@@ -31,29 +32,23 @@ export default function LedgerHeader({
   const successRatio = totalCollected > 0 ? ((netProfit / totalCollected) * 100).toFixed(0) : 0;
   const hasData = totalPayments > 0 || totalExpenses > 0 || totalSent > 0;
 
-  // Folding Animations
+  // Header Animation logic
   const heroOpacity = scrollY.interpolate({
-    inputRange: [0, 100],
+    inputRange: [0, 150],
     outputRange: [1, 0],
     extrapolate: 'clamp'
   });
 
-  const heroScale = scrollY.interpolate({
-    inputRange: [0, 100],
-    outputRange: [1, 0.8],
-    extrapolate: 'clamp'
-  });
-
   const headerTranslateY = scrollY.interpolate({
-    inputRange: [0, 150],
-    outputRange: [0, -180], // Fold up
+    inputRange: [0, 200],
+    outputRange: [0, -220],
     extrapolate: 'clamp'
   });
 
   return (
     <Animated.View style={[styles.container, { transform: [{ translateY: headerTranslateY }] }]}>
       <View style={styles.headerInner}>
-        {/* Persistent App Bar */}
+        {/* Persistent Top Row */}
         <View style={styles.headerTop}>
           <Text style={styles.headerTitle}>PESA<Text style={{ fontWeight: '300', opacity: 0.7 }}>LIST</Text></Text>
           <View style={styles.headerRight}>
@@ -64,8 +59,8 @@ export default function LedgerHeader({
           </View>
         </View>
 
-        {/* Collapsible Hero Area */}
-        <Animated.View style={{ opacity: heroOpacity, transform: [{ scale: heroScale }] }}>
+        {/* Collapsible Section */}
+        <Animated.View style={{ opacity: heroOpacity }}>
           <View style={styles.displayArea}>
             <View>
               <View style={[styles.statusBadge, { backgroundColor: hasData ? 'rgba(0,255,0,0.1)' : 'rgba(255,255,255,0.1)' }]}>
@@ -75,7 +70,7 @@ export default function LedgerHeader({
               <Text style={styles.mainAmount}>
                 <Text style={styles.currency}>Ksh</Text> {isPrivacyMode ? '••••' : reconciledBalance.toLocaleString()}
               </Text>
-              <Text style={styles.labelCaps}>TRUE BALANCE (CASH - DEBTS)</Text>
+              <Text style={styles.labelCaps}>NET POSITION (CASH - DEBTS)</Text>
             </View>
             <View style={styles.circleDisplay}>
                <Text style={styles.ratioText}>{successRatio}%</Text>
@@ -83,13 +78,19 @@ export default function LedgerHeader({
             </View>
           </View>
 
-          {/* Banner Row */}
-          {(gamblingWasted > 0 || utilitySpent > 0) && (
+          {/* Warning Row (Betting / Airtime / Phone Loans) */}
+          {(gamblingWasted > 0 || utilitySpent > 0 || phoneLoanSpent > 0) && (
             <View style={styles.warningRow}>
               {utilitySpent > 0 && (
                 <View style={[styles.smallBanner, { backgroundColor: 'rgba(59, 130, 246, 0.15)', borderColor: 'rgba(59, 130, 246, 0.3)' }]}>
                   <Text style={[styles.bannerLabel, { color: '#60A5FA' }]}>AIRTIME:</Text>
                   <Text style={styles.bannerValue}>Ksh {utilitySpent.toLocaleString()}</Text>
+                </View>
+              )}
+              {phoneLoanSpent > 0 && (
+                <View style={[styles.smallBanner, { backgroundColor: 'rgba(168, 85, 247, 0.15)', borderColor: 'rgba(168, 85, 247, 0.3)' }]}>
+                  <Text style={[styles.bannerLabel, { color: '#C084FC' }]}>DEVICES:</Text>
+                  <Text style={styles.bannerValue}>Ksh {phoneLoanSpent.toLocaleString()}</Text>
                 </View>
               )}
               {gamblingWasted > 0 && (
@@ -101,7 +102,7 @@ export default function LedgerHeader({
             </View>
           )}
 
-          {/* Debt Summary */}
+          {/* Cash & Loan Summary */}
           <View style={styles.balanceBanner}>
              <View style={{ flex: 1.2 }}>
                 <Text style={styles.balanceLabel}>M-PESA CASH:</Text>
@@ -139,7 +140,7 @@ export default function LedgerHeader({
           </View>
         </View>
 
-        {/* Floating Search & Tabs Area */}
+        {/* Floating Search & Tabs */}
         <View style={{ marginTop: 15 }}>
           {children}
         </View>
@@ -161,7 +162,7 @@ const styles = StyleSheet.create({
     top: 0, left: 0, right: 0
   },
   headerInner: { paddingHorizontal: 22 },
-  headerTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
+  headerTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
   headerTitle: { color: '#fff', fontSize: 22, fontWeight: '900', letterSpacing: 1.5 },
   headerRight: { flexDirection: 'row', gap: 8 },
   glassBtn: { backgroundColor: 'rgba(255,255,255,0.12)', padding: 10, borderRadius: 14, borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)' },

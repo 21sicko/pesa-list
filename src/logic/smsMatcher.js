@@ -1,12 +1,16 @@
-// smsMatcher.js — Ultimate Accounting Engine: Fees, Airtime, Betting, Multi-Loans & Reversals
+// smsMatcher.js — Pro Version: Loans, Betting, Phone Lending, Utilities & Fees
 const SAFARICOM_SENDER_IDS = ['MPESA', 'M-PESA', 'M_PESA'];
 
-// Expanded betting keywords to catch companies like Metawebsolutions (BetFlame)
 const BETTING_KEYWORDS = [
   'SPORTPESA', 'BETIKA', 'ODIBETS', 'MOZZART', 'BETWAY', '22BET',
   'MELBET', 'BETPAWA', 'KIBET', 'SHABIKI', 'DAFABET', 'LUCKYBIRD',
   'METAWEBSOLUTIONS', 'BETFLAME', 'CHOPBET', 'EAZIBET', 'GALSPORT',
-  'ONFON', 'GAMING'
+  'ONFON', 'GAMING', 'BUNGABET', 'PREMIERBET'
+];
+
+const PHONE_LENDING_KEYWORDS = [
+  'M-KOPA', 'MKOPA', 'D.LIGHT', 'DLIGHT', 'TUGENDE', 'BBOXX', 'SUNCULTURE',
+  'COPPIA', 'M-KOPA SOLAR', 'LIPA MDOGO MDOGO'
 ];
 
 function isSafaricomSender(senderId) {
@@ -37,11 +41,16 @@ function isGambling(name, accountRef) {
   return BETTING_KEYWORDS.some(site => combined.includes(site));
 }
 
+function isPhoneLoan(name) {
+  if (!name) return false;
+  const n = name.toUpperCase();
+  return PHONE_LENDING_KEYWORDS.some(co => n.includes(co));
+}
+
 function parseMpesasms(smsText, senderId) {
   if (!smsText || !isSafaricomSender(senderId)) return { isValid: false };
   const text = smsText.trim();
 
-  // High-level filter for financial confirmations
   if (!/Confirmed/i.test(text) && !/received/i.test(text) && !/sent/i.test(text) && !/paid/i.test(text) && !/bought/i.test(text) && !/transferred/i.test(text) && !/balance/i.test(text) && !/withdrawn/i.test(text) && !/reversal|reversed/i.test(text) && !/used to (?:repay|pay)/i.test(text)) return { isValid: false };
   if (/cancelled/i.test(text)) return { isValid: false };
 
@@ -49,16 +58,16 @@ function parseMpesasms(smsText, senderId) {
   const balanceMatch = text.match(/(?:New|M-PESA)\s+balance\s+is\s+Ksh\s*([\d,]+\.?\d{0,2})/i);
   const postBalance = balanceMatch ? parseAmount(balanceMatch[1]) : null;
 
-  // 2. Detect Transaction Cost (Math Reconciliation)
+  // 2. Detect Transaction Cost
   const costMatch = text.match(/Transaction\s+cost,\s+Ksh\s*([\d,]+\.?\d{0,2})/i);
   const txCost = costMatch ? parseAmount(costMatch[1]) : 0;
 
-  // 3. Reversal — money credited back to the wallet
+  // 3. Reversal
   const reversal = tryReversalPattern(text);
   if (reversal) {
     return {
       isValid: true, type: 'REVERSAL', postBalance, txCost: 0, fulizaDebt: 0, kcbDebt: 0, mshwariDebt: 0,
-      isGambling: false, isUtility: false, ...reversal, rawText: text.substring(0, 120)
+      isGambling: false, isUtility: false, isPhoneLoan: false, ...reversal, rawText: text.substring(0, 120)
     };
   }
 
@@ -76,16 +85,18 @@ function parseMpesasms(smsText, senderId) {
     return {
       isValid: true, type: 'RECEIVED', postBalance, txCost, fulizaDebt, kcbDebt, mshwariDebt,
       isGambling: isGambling(received.senderName, received.accountRef),
+      isPhoneLoan: isPhoneLoan(received.senderName),
       isUtility: false, ...received, rawText: text.substring(0, 120)
     };
   }
 
-  // 6. Try "Sent / Paid / Transferred / Bought / Withdrawn" patterns
+  // 6. Try "Sent / Paid / Transferred / Bought" patterns
   const sent = trySentPatterns(text);
   if (sent) {
     return {
       isValid: true, type: 'SENT', postBalance, txCost, fulizaDebt, kcbDebt, mshwariDebt,
       isGambling: isGambling(sent.senderName, null),
+      isPhoneLoan: isPhoneLoan(sent.senderName),
       isUtility: sent.isUtility || false, ...sent, rawText: text.substring(0, 120)
     };
   }
@@ -103,33 +114,26 @@ function tryReversalPattern(text) {
   const rx2 = /Ksh\s*([\d,]+\.?\d{0,2})\s+(?:has\s+been\s+)?reversed/i;
   const match = text.match(rx1) || text.match(rx2);
   if (!match) return null;
-
   const codeMatch = text.match(/\b([A-Z0-9]{8,12})\b/);
   const code = codeMatch ? `REV_${codeMatch[1]}` : `FB_REV_${Date.now()}`;
-
-  return {
-    transactionCode: code,
-    amount: parseAmount(match[1]),
-    senderName: 'M-PESA REVERSAL',
-    senderPhone: null,
-    parsedAt: new Date().toISOString(),
-  };
+  return { transactionCode: code, amount: parseAmount(match[1]), senderName: 'M-PESA REVERSAL', senderPhone: null, parsedAt: new Date().toISOString() };
 }
 
 function tryReceivedPatterns(text) {
   const patterns = [
     {
-      // Standard: received Ksh AMT from NAME PHONE
       rx: /(?:You have received|received)\s+Ksh\s*([\d,]+\.?\d{0,2})\s+from\s+([A-Z\s\.\-']+?)(?:\s+([\dX\*]{6,14}))?(?:\s+(?:for account|for your)\s+([A-Z0-9\s]+?))?(?:\s+(?:on|at|New|Your|Fuliza|KCB|M-Shwari)|\.|$)/i,
       map: { amount: 1, name: 2, phone: 3, account: 4 }
     },
     {
-      // Loan disbursement: received a loan of Ksh AMT from NAME
+      rx: /Ksh\s*([\d,]+\.?\d{0,2})\s+transferred\s+from\s+your\s+(M-Shwari|KCB\s+M-PESA)\s+account/i,
+      map: { amount: 1, name: 2 }
+    },
+    {
       rx: /received\s+a\s+loan\s+of\s+Ksh\s*([\d,]+\.?\d{0,2})\s+from\s+([A-Za-z\-\s]+?)(?:\.|,|\s+(?:on|at|Interest)|$)/i,
       map: { amount: 1, name: 2 }
     },
     {
-      // Bank to M-Pesa: Ksh AMT has been transferred from your BANK account
       rx: /Ksh\s*([\d,]+\.?\d{0,2})\s+(?:has\s+been\s+)?transferred\s+from\s+(?:your\s+)?([A-Za-z0-9\s\.\-']+?)\s+(?:account\s+)?to\s+(?:your\s+)?M-?PESA/i,
       map: { amount: 1, name: 2 }
     }
@@ -142,7 +146,6 @@ function tryReceivedPatterns(text) {
     let accountRef = null;
     if (p.map.account && match[p.map.account]) {
        accountRef = match[p.map.account].trim().replace(/\s+(on|at).*/i, '');
-       if (text.includes('Pochi')) accountRef = `Pochi: ${accountRef}`;
     }
     return {
       transactionCode: code,
@@ -158,33 +161,31 @@ function tryReceivedPatterns(text) {
 function trySentPatterns(text) {
   const patterns = [
     {
-      // Standard Sent
       rx: /Ksh\s*([\d,]+\.?\d{0,2})\s+sent\s+to\s+([A-Z\s\.\-']+?)\s+([\dX\*]{6,14})?(?:\s+(?:on|at|has|\.|$))/i,
       map: { amount: 1, name: 2, phone: 3 }, isUtility: false
     },
     {
-      // Paid to Business
+      rx: /Ksh\s*([\d,]+\.?\d{0,2})\s+transferred\s+to\s+your\s+(M-Shwari|KCB\s+M-PESA)\s+account/i,
+      map: { amount: 1, name: 2 }, isUtility: false
+    },
+    {
       rx: /Ksh\s*([\d,]+\.?\d{0,2})\s+paid\s+to\s+([A-Z\s\.\-']+?)(?:\s+(?:for account|for your)\s+([A-Z0-9\s]+?))?(?:\s+(?:on|at|has|\.|$))/i,
       map: { amount: 1, name: 2, account: 3 }, isUtility: false
     },
     {
-      // Agent Withdrawal
       rx: /withdrawn\s+Ksh\s*([\d,]+\.?\d{0,2})\s+from\s+(?:agent\s+)?([A-Za-z0-9\s\.\-']+?)(?:\s+(?:on|at|has|New)\b|\.|$)/i,
       map: { amount: 1, name: 2 }, isUtility: false
     },
     {
-      // Loan repayment
       rx: /Ksh\s*([\d,]+\.?\d{0,2})\s+(?:has\s+been\s+)?used\s+to\s+(?:repay|pay)\s+(?:your\s+)?([A-Za-z\-\s]+?)\s+loan/i,
       map: { amount: 1, name: 2 }, isUtility: false
     },
     {
-      // Transferred to Bank
       rx: /Ksh\s*([\d,]+\.?\d{0,2})\s+transferred\s+to\s+([A-Z\s\.\-']+?)(?:\s+(?:on|at|has|\.|$))/i,
       map: { amount: 1, name: 2 }, isUtility: false
     },
     {
-      // Airtime/Data
-      rx: /(?:You\s+)?bought\s+Ksh\s*([\d,]+\.?\d{0,2})\s+of\s+([A-Za-z\/\s]+?)\s+for\s+([A-Z0-9\s\.\-']+?)(?:\s+on|at|New|Your|\.|$)/i,
+      rx: /(?:You\s+)?bought\s+Ksh\s*([\d,]+\.?\d{0,2})\s+of\s+([A-Za-z0-9\/\s]+?)\s+for\s+([A-Z0-9\s\.\-']+?)(?:\s+on|at|New|Your|\.|$)/i,
       map: { amount: 1, category: 2, recipient: 3 }, isUtility: true
     }
   ];
@@ -192,8 +193,9 @@ function trySentPatterns(text) {
     const match = text.match(p.rx);
     if (match) {
       const codeMatch = text.match(/\b([A-Z0-9]{8,12})\b/);
+      const code = codeMatch ? codeMatch[1] : `FB_S_${Date.now()}`;
       let senderName = p.map.category ? `${match[p.map.category].toUpperCase().trim()}: ${match[p.map.recipient].trim()}` : cleanName(match[p.map.name]);
-      return { transactionCode: codeMatch ? codeMatch[1] : `FB_S_${Date.now()}`, amount: parseAmount(match[p.map.amount]), senderName, senderPhone: p.map.phone ? match[p.map.phone] : null, isUtility: p.isUtility };
+      return { transactionCode: code, amount: parseAmount(match[p.map.amount]), senderName, senderPhone: p.map.phone ? match[p.map.phone] : null, isUtility: p.isUtility };
     }
   }
   return null;
